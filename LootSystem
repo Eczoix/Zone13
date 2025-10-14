@@ -1,0 +1,305 @@
+-- Requires loot prefabs in ReplicatedStorage > LootItems
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local CollectionService = game:GetService("CollectionService")
+
+-- ===== CONFIGURATION =====
+local LootSpawnSystem = {}
+
+-- Loot configuration with rarity tiers and spawn chances
+LootSpawnSystem.Config = {
+	-- Global spawn chance (0-100) - chance that any spawn point gets loot
+	GLOBAL_SPAWN_CHANCE = 80,
+
+	-- Rarity tier weights (higher = more likely) - temporarily set to only spawn Common
+	RARITY_WEIGHTS = {
+		Common = 65,
+		Uncommon = 20,
+		Rare = 10,
+		Legendary = 5
+	},
+
+	-- Loot items per tier with individual spawn weights
+	LOOT_ITEMS = {
+		Common = {
+			{name = "Wood Plank", weight = 100},
+			{name = "Batteries", weight = 100}
+			
+		},
+		Uncommon = {
+			-- Add items here later
+		},
+		Rare = {
+			-- Add items here later
+		},
+		Legendary = {
+			-- Add items here later
+		}
+	},
+
+	-- Spawn point scanning settings
+	HOUSES_FOLDER = "SlumHouses",
+	LOOT_SPAWNS_FOLDER = "LootSpawns",
+	SPAWNER_PART_NAME = "Spawner",
+	LOOT_ITEMS_FOLDER = "LootItems"
+}
+
+-- ===== UTILITY FUNCTIONS =====
+
+-- Weighted random selection
+function LootSpawnSystem.WeightedRandom(items)
+	local totalWeight = 0
+	for _, item in pairs(items) do
+		totalWeight = totalWeight + item.weight
+	end
+
+	local randomValue = math.random() * totalWeight
+	local currentWeight = 0
+
+	for _, item in pairs(items) do
+		currentWeight = currentWeight + item.weight
+		if randomValue <= currentWeight then
+			return item
+		end
+	end
+
+	-- Fallback to first item
+	return items[1]
+end
+
+-- Get rarity tier based on weighted chance
+function LootSpawnSystem.GetRandomRarity()
+	local rarityTable = {}
+	for rarity, weight in pairs(LootSpawnSystem.Config.RARITY_WEIGHTS) do
+		table.insert(rarityTable, {name = rarity, weight = weight})
+	end
+
+	local selectedRarity = LootSpawnSystem.WeightedRandom(rarityTable)
+	return selectedRarity.name
+end
+
+-- Get random loot item from a specific rarity tier
+function LootSpawnSystem.GetRandomLootFromTier(rarity)
+	local lootTable = LootSpawnSystem.Config.LOOT_ITEMS[rarity]
+	if not lootTable or #lootTable == 0 then
+		warn("No loot items found for rarity: " .. rarity)
+		return nil
+	end
+
+	local selectedLoot = LootSpawnSystem.WeightedRandom(lootTable)
+	return selectedLoot.name
+end
+
+-- Align loot item to surface with proper positioning
+function LootSpawnSystem.AlignToSurface(lootModel, spawnPoint)
+	if not lootModel.PrimaryPart then
+		warn("Loot model " .. lootModel.Name .. " has no PrimaryPart! Attempting to set first part as PrimaryPart...")
+		-- Try to set the first part as PrimaryPart
+		for _, part in pairs(lootModel:GetChildren()) do
+			if part:IsA("BasePart") then
+				lootModel.PrimaryPart = part
+				print("Set " .. part.Name .. " as PrimaryPart for " .. lootModel.Name)
+				break
+			end
+		end
+
+		if not lootModel.PrimaryPart then
+			warn("Could not find any parts in " .. lootModel.Name .. " to set as PrimaryPart!")
+			return
+		end
+	end
+
+	-- Get spawn point properties
+	local spawnPosition = spawnPoint.Position
+	local spawnSize = spawnPoint.Size
+
+	-- Calculate surface position (top of the spawn point)
+	local surfaceY = spawnPosition.Y + (spawnSize.Y / 2)
+
+	-- Get loot model bounds
+	local lootSize = lootModel.PrimaryPart.Size
+	local lootOffset = lootSize.Y / 2
+
+	-- Position loot on surface with slight random offset for realism
+	local randomOffsetX = (math.random() - 0.5) * (spawnSize.X * 0.6)
+	local randomOffsetZ = (math.random() - 0.5) * (spawnSize.Z * 0.6)
+
+	local finalPosition = Vector3.new(
+		spawnPosition.X + randomOffsetX,
+		surfaceY + lootOffset + 0.5, -- Increased buffer to ensure visibility
+		spawnPosition.Z + randomOffsetZ
+	)
+
+	-- Apply position and random rotation for variety
+	lootModel:SetPrimaryPartCFrame(CFrame.new(finalPosition) * CFrame.Angles(0, math.rad(math.random(0, 360)), 0))
+
+	print("Positioned " .. lootModel.Name .. " at: " .. tostring(finalPosition) .. " (Spawner at: " .. tostring(spawnPosition) .. ")")
+end
+
+-- ===== MAIN SPAWN LOGIC =====
+
+-- Spawn loot at a specific spawn point
+function LootSpawnSystem.SpawnLootAtPoint(spawnPoint)
+	-- Check global spawn chance
+	if math.random(1, 100) > LootSpawnSystem.Config.GLOBAL_SPAWN_CHANCE then
+		return -- No loot spawns here
+	end
+
+	-- Get random rarity tier
+	local rarity = LootSpawnSystem.GetRandomRarity()
+
+	-- Get random loot item from that tier
+	local lootName = LootSpawnSystem.GetRandomLootFromTier(rarity)
+	if not lootName then
+		return
+	end
+
+	-- Try to find loot prefab in ReplicatedStorage
+	local lootItemsFolder = ReplicatedStorage:FindFirstChild(LootSpawnSystem.Config.LOOT_ITEMS_FOLDER)
+	if not lootItemsFolder then
+		warn("LootItems folder not found in ReplicatedStorage!")
+		return
+	end
+
+	local lootPrefab = lootItemsFolder:FindFirstChild(lootName)
+	if not lootPrefab then
+		warn("Loot prefab not found: " .. lootName)
+		return
+	end
+
+	-- Clone and spawn the loot
+	local lootClone = lootPrefab:Clone()
+	lootClone.Parent = Workspace
+
+	print("Spawning " .. lootName .. " at spawner: " .. spawnPoint.Name .. " (Position: " .. tostring(spawnPoint.Position) .. ")")
+
+	-- Align to surface
+	LootSpawnSystem.AlignToSurface(lootClone, spawnPoint)
+
+	-- Add loot identification and Collectable tag
+	lootClone:SetAttribute("LootRarity", rarity)
+	lootClone:SetAttribute("SpawnedAt", tick())
+
+	-- Add Collectable tag for easy identification
+	local CollectionService = game:GetService("CollectionService")
+	CollectionService:AddTag(lootClone, "Collectable")
+
+	print("Spawned " .. rarity .. " loot: " .. lootName .. " at " .. spawnPoint.Parent.Name)
+end
+
+-- Scan and process all spawner parts in a house
+function LootSpawnSystem.ProcessHouse(house)
+	local lootSpawnsFolder = house:FindFirstChild(LootSpawnSystem.Config.LOOT_SPAWNS_FOLDER)
+	if not lootSpawnsFolder then
+		warn("No LootSpawns folder found in house: " .. house.Name)
+		return
+	end
+
+	local spawnCount = 0
+	local totalSpawners = 0
+
+	-- Find all parts named "Spawner" in the LootSpawns folder
+	for _, spawner in pairs(lootSpawnsFolder:GetChildren()) do
+		if spawner.Name == LootSpawnSystem.Config.SPAWNER_PART_NAME and spawner:IsA("BasePart") then
+			totalSpawners = totalSpawners + 1
+
+			-- Attempt to spawn loot
+			local oldChildCount = Workspace:GetChildren()
+			LootSpawnSystem.SpawnLootAtPoint(spawner)
+
+			-- Count successful spawns (simple check)
+			if #Workspace:GetChildren() > #oldChildCount then
+				spawnCount = spawnCount + 1
+			end
+		end
+	end
+
+	if totalSpawners == 0 then
+		warn("No 'Spawner' parts found in LootSpawns folder of house: " .. house.Name)
+		return
+	end
+
+	print("House " .. house.Name .. ": " .. spawnCount .. "/" .. totalSpawners .. " spawners got loot")
+end
+
+-- Main initialization function
+function LootSpawnSystem.Initialize()
+	print("=== Initializing Apocalyptic Slum Loot Spawn System ===")
+
+	-- Verify ReplicatedStorage setup
+	local lootItemsFolder = ReplicatedStorage:FindFirstChild(LootSpawnSystem.Config.LOOT_ITEMS_FOLDER)
+	if not lootItemsFolder then
+		error("LootItems folder not found in ReplicatedStorage! Please create it and add loot prefabs.")
+		return
+	end
+
+	-- Find houses folder
+	local housesFolder = Workspace:FindFirstChild(LootSpawnSystem.Config.HOUSES_FOLDER)
+	if not housesFolder then
+		warn("SlumHouses folder not found in Workspace! Looking for individual houses...")
+		-- Alternative: scan workspace for any folder containing "LootSpawns"
+		for _, obj in pairs(Workspace:GetChildren()) do
+			if obj:FindFirstChild(LootSpawnSystem.Config.LOOT_SPAWNS_FOLDER) then
+				LootSpawnSystem.ProcessHouse(obj)
+			end
+		end
+		return
+	end
+
+	-- Process all houses
+	local housesProcessed = 0
+	for _, house in pairs(housesFolder:GetChildren()) do
+		if house:IsA("Model") or house:IsA("Folder") then
+			LootSpawnSystem.ProcessHouse(house)
+			housesProcessed = housesProcessed + 1
+		end
+	end
+
+	print("=== Loot spawn complete! Processed " .. housesProcessed .. " houses ===")
+end
+
+-- ===== MODULAR EXPANSION FUNCTIONS =====
+
+-- Add new loot item to existing rarity tier
+function LootSpawnSystem.AddLootItem(rarity, itemName, weight)
+	if not LootSpawnSystem.Config.LOOT_ITEMS[rarity] then
+		warn("Rarity tier " .. rarity .. " does not exist!")
+		return false
+	end
+
+	table.insert(LootSpawnSystem.Config.LOOT_ITEMS[rarity], {name = itemName, weight = weight or 10})
+	print("Added " .. itemName .. " to " .. rarity .. " tier")
+	return true
+end
+
+-- Add new rarity tier
+function LootSpawnSystem.AddRarityTier(rarityName, weight, lootItems)
+	LootSpawnSystem.Config.RARITY_WEIGHTS[rarityName] = weight or 10
+	LootSpawnSystem.Config.LOOT_ITEMS[rarityName] = lootItems or {}
+	print("Added new rarity tier: " .. rarityName)
+end
+
+-- Manual spawn function for testing
+function LootSpawnSystem.TestSpawn(spawnPoint)
+	if spawnPoint and spawnPoint:IsA("BasePart") then
+		LootSpawnSystem.SpawnLootAtPoint(spawnPoint)
+	else
+		warn("Invalid spawn point for testing!")
+	end
+end
+
+-- ===== INITIALIZATION =====
+
+-- Auto-start the system when the script loads
+wait(2) -- Brief delay to ensure workspace is loaded
+LootSpawnSystem.Initialize()
+
+-- Make the system globally accessible for expansion
+_G.LootSpawnSystem = LootSpawnSystem
+
+-- Example of how to add new loot items after initialization:
+-- _G.LootSpawnSystem.AddLootItem("Common", "Broken Glass", 15)
+-- _G.LootSpawnSystem.AddLootItem("Rare", "Advanced Medkit", 20)
+
+return LootSpawnSystem
