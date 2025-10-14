@@ -1,0 +1,320 @@
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+local ServerStorage = game:GetService("ServerStorage")
+local RunService = game:GetService("RunService")
+
+print("[SACK] Loading Sack System Server...")
+
+-- Configuration
+local SACK_CAPACITY = 15
+local COLLECTION_RANGE = 15
+
+-- Create RemoteEvents folder
+local remoteFolder = ReplicatedStorage:FindFirstChild("SackRemotes")
+if not remoteFolder then
+	remoteFolder = Instance.new("Folder")
+	remoteFolder.Name = "SackRemotes"
+	remoteFolder.Parent = ReplicatedStorage
+end
+
+-- Create RemoteEvents and Functions
+local collectRemote = remoteFolder:FindFirstChild("CollectItem") or Instance.new("RemoteEvent")
+collectRemote.Name = "CollectItem"
+collectRemote.Parent = remoteFolder
+
+local dropRemote = remoteFolder:FindFirstChild("DropItem") or Instance.new("RemoteEvent")
+dropRemote.Name = "DropItem"
+dropRemote.Parent = remoteFolder
+
+local updateCountRemote = remoteFolder:FindFirstChild("UpdateCount") or Instance.new("RemoteEvent")
+updateCountRemote.Name = "UpdateCount"
+updateCountRemote.Parent = remoteFolder
+
+local getItemsNearby = remoteFolder:FindFirstChild("GetItemsNearby") or Instance.new("RemoteFunction")
+getItemsNearby.Name = "GetItemsNearby"
+getItemsNearby.Parent = remoteFolder
+
+-- Player sack data storage
+local playerSacks = {}
+
+-- Storage folder setup
+local function setupStorage()
+	local storage = ServerStorage:FindFirstChild("SackItems")
+	if not storage then
+		storage = Instance.new("Folder")
+		storage.Name = "SackItems"
+		storage.Parent = ServerStorage
+	end
+	return storage
+end
+
+local sackStorage = setupStorage()
+
+-- Initialize player sack
+local function initPlayer(player)
+	playerSacks[player.UserId] = {
+		items = {},
+		count = 0
+	}
+
+	-- Create player storage folder
+	local playerFolder = sackStorage:FindFirstChild(tostring(player.UserId))
+	if not playerFolder then
+		playerFolder = Instance.new("Folder")
+		playerFolder.Name = tostring(player.UserId)
+		playerFolder.Parent = sackStorage
+	end
+
+	-- Send initial count to player
+	task.wait(1)
+	updateCountRemote:FireClient(player, 0, SACK_CAPACITY)
+	print("[SACK] Initialized sack for", player.Name)
+end
+
+-- Get item position
+local function getItemPosition(item)
+	if item:IsA("Model") then
+		if item.PrimaryPart then
+			return item.PrimaryPart.Position
+		else
+			local part = item:FindFirstChildWhichIsA("BasePart", true)
+			if part then
+				return part.Position
+			end
+		end
+	elseif item:IsA("BasePart") then
+		return item.Position
+	end
+	return nil
+end
+
+-- Validate collection request
+local function validateCollection(player, targetItem)
+	-- Check if item exists and is valid
+	if not targetItem or not targetItem.Parent then
+		return false, "Invalid item"
+	end
+
+	-- Check if tagged as collectable
+	if not CollectionService:HasTag(targetItem, "Collectable") then
+		return false, "Item not collectable"
+	end
+
+	-- Check player character
+	local character = player.Character
+	if not character then
+		return false, "No character"
+	end
+
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
+		return false, "No HumanoidRootPart"
+	end
+
+	-- Check distance
+	local itemPos = getItemPosition(targetItem)
+	if not itemPos then
+		return false, "Cannot get item position"
+	end
+
+	local distance = (humanoidRootPart.Position - itemPos).Magnitude
+	if distance > COLLECTION_RANGE then
+		return false, "Too far away"
+	end
+
+	-- Check sack capacity
+	local sackData = playerSacks[player.UserId]
+	if not sackData then
+		return false, "No sack data"
+	end
+
+	if sackData.count >= SACK_CAPACITY then
+		return false, "Sack is full"
+	end
+
+	return true, "Valid"
+end
+
+-- Collection handler
+collectRemote.OnServerEvent:Connect(function(player, targetItem)
+	local valid, reason = validateCollection(player, targetItem)
+
+	if not valid then
+		print("[SACK] Collection failed:", reason)
+		return
+	end
+
+	local sackData = playerSacks[player.UserId]
+	local playerFolder = sackStorage:FindFirstChild(tostring(player.UserId))
+
+	if not playerFolder then
+		playerFolder = Instance.new("Folder")
+		playerFolder.Name = tostring(player.UserId)
+		playerFolder.Parent = sackStorage
+	end
+
+	-- Clone and store item
+	local itemClone = targetItem:Clone()
+	itemClone.Name = targetItem.Name .. "_" .. (sackData.count + 1)
+	itemClone.Parent = playerFolder
+
+	-- Remove physics from stored item
+	for _, part in pairs(itemClone:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+			part.CanCollide = false
+		end
+	end
+
+	-- Update sack data
+	table.insert(sackData.items, {
+		name = targetItem.Name,
+		originalName = targetItem.Name,
+		storedName = itemClone.Name
+	})
+	sackData.count = sackData.count + 1
+
+	-- Remove original item
+	targetItem:Destroy()
+
+	print("[SACK]", player.Name, "collected", targetItem.Name, "- Count:", sackData.count)
+
+	-- Update client
+	updateCountRemote:FireClient(player, sackData.count, SACK_CAPACITY)
+end)
+
+-- Drop handler
+dropRemote.OnServerEvent:Connect(function(player)
+	local sackData = playerSacks[player.UserId]
+
+	if not sackData or sackData.count <= 0 then
+		print("[SACK] No items to drop")
+		return
+	end
+
+	local character = player.Character
+	if not character then
+		return
+	end
+
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then
+		return
+	end
+
+	-- Get last item
+	local lastItem = sackData.items[sackData.count]
+	local playerFolder = sackStorage:FindFirstChild(tostring(player.UserId))
+
+	if playerFolder then
+		local storedItem = playerFolder:FindFirstChild(lastItem.storedName)
+
+		if storedItem then
+			-- Calculate drop position
+			local dropPos = humanoidRootPart.Position + (humanoidRootPart.CFrame.LookVector * 5)
+
+			-- Clone to workspace
+			local droppedItem = storedItem:Clone()
+			droppedItem.Name = lastItem.originalName
+			droppedItem.Parent = workspace
+
+			-- Position and enable physics
+			if droppedItem:IsA("Model") then
+				if droppedItem.PrimaryPart then
+					droppedItem:SetPrimaryPartCFrame(CFrame.new(dropPos + Vector3.new(0, 2, 0)))
+				else
+					droppedItem:MoveTo(dropPos + Vector3.new(0, 2, 0))
+				end
+			elseif droppedItem:IsA("BasePart") then
+				droppedItem.CFrame = CFrame.new(dropPos + Vector3.new(0, 2, 0))
+			end
+
+			-- Re-enable physics
+			for _, part in pairs(droppedItem:GetDescendants()) do
+				if part:IsA("BasePart") then
+					part.Anchored = false
+					part.CanCollide = true
+				end
+			end
+
+			-- Re-tag as collectable
+			CollectionService:AddTag(droppedItem, "Collectable")
+
+			-- Remove from storage
+			storedItem:Destroy()
+
+			print("[SACK]", player.Name, "dropped", lastItem.originalName)
+		end
+	end
+
+	-- Update sack data
+	table.remove(sackData.items, sackData.count)
+	sackData.count = sackData.count - 1
+
+	-- Update client
+	updateCountRemote:FireClient(player, sackData.count, SACK_CAPACITY)
+end)
+
+-- Get nearby items function for mobile
+getItemsNearby.OnServerInvoke = function(player)
+	local character = player.Character
+	if not character then return {} end
+
+	local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+	if not humanoidRootPart then return {} end
+
+	local nearbyItems = {}
+	local playerPos = humanoidRootPart.Position
+
+	for _, item in pairs(workspace:GetDescendants()) do
+		if CollectionService:HasTag(item, "Collectable") then
+			local itemPos = getItemPosition(item)
+			if itemPos then
+				local distance = (playerPos - itemPos).Magnitude
+				if distance <= COLLECTION_RANGE then
+					table.insert(nearbyItems, {
+						item = item,
+						distance = distance
+					})
+				end
+			end
+		end
+	end
+
+	-- Sort by distance
+	table.sort(nearbyItems, function(a, b)
+		return a.distance < b.distance
+	end)
+
+	-- Return only the items (not distances)
+	local items = {}
+	for _, data in ipairs(nearbyItems) do
+		table.insert(items, data.item)
+	end
+
+	return items
+end
+
+-- Player events
+Players.PlayerAdded:Connect(initPlayer)
+
+Players.PlayerRemoving:Connect(function(player)
+	print("[SACK] Cleaning up for", player.Name)
+
+	-- Clean storage
+	local playerFolder = sackStorage:FindFirstChild(tostring(player.UserId))
+	if playerFolder then
+		playerFolder:Destroy()
+	end
+
+	playerSacks[player.UserId] = nil
+end)
+
+-- Initialize existing players
+for _, player in pairs(Players:GetPlayers()) do
+	initPlayer(player)
+end
+
+print("[SACK] Server System Loaded Successfully!")
