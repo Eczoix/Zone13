@@ -1,0 +1,136 @@
+-- Multi-Part Water Swimming Script with Underwater Screen
+-- Put this as a LocalScript in StarterPlayer > StarterPlayerScripts
+
+local WaterModel = workspace.Water -- Your water model
+local RS = game:GetService("RunService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+
+-- Create the underwater screen overlay
+-- Create the underwater screen overlay
+local PlayerGui = player:WaitForChild("PlayerGui")
+local underwaterScreen = Instance.new("ScreenGui")
+underwaterScreen.Name = "UnderwaterScreen"
+underwaterScreen.ResetOnSpawn = false
+underwaterScreen.IgnoreGuiInset = true -- <-- THIS is important
+underwaterScreen.Parent = PlayerGui
+
+local overlay = Instance.new("Frame")
+overlay.Size = UDim2.new(1, 0, 1, 0)
+overlay.Position = UDim2.new(0, 0, 0, 0)
+overlay.BackgroundColor3 = Color3.fromRGB(20, 60, 90) -- Underwater color
+overlay.BackgroundTransparency = 0.5 -- Transparency (0 = solid, 1 = invisible)
+overlay.Visible = false
+overlay.Parent = underwaterScreen
+
+
+-- Wait for character
+local function onCharacterAdded(character)
+	local Humanoid = character:WaitForChild("Humanoid")
+	local Root = character:WaitForChild("HumanoidRootPart")
+	local Swim
+
+	-- Function to check if player is in any water part (works for rotated parts)
+	local function isInWater()
+		local rootPos = Root.Position
+
+		for _, waterPart in pairs(WaterModel:GetChildren()) do
+			if waterPart:IsA("BasePart") then
+				-- Convert player position into waterPart's local space
+				local relativePos = waterPart.CFrame:PointToObjectSpace(rootPos)
+
+				local halfSize = waterPart.Size / 2
+				local playerBottom = relativePos.Y - Root.Size.Y / 2
+
+				-- Check if inside the local bounds
+				if relativePos.X >= -halfSize.X and relativePos.X <= halfSize.X and
+					relativePos.Y <= halfSize.Y and playerBottom <= halfSize.Y and
+					relativePos.Z >= -halfSize.Z and relativePos.Z <= halfSize.Z then
+					local waterSurface = waterPart.Position.Y + halfSize.Y
+					return true, waterSurface
+				end
+			end
+		end
+
+		return false
+	end
+
+	-- Main swimming loop
+	local connection
+	connection = RS.Heartbeat:Connect(function()
+		if not Root.Parent then
+			connection:Disconnect()
+			return
+		end
+
+		local inWater, waterSurface = isInWater()
+
+		if inWater then
+			-- Show underwater overlay
+			overlay.Visible = true
+
+			-- Player is in water
+			if not Swim then
+				Swim = Instance.new("BodyVelocity")
+				Swim.MaxForce = Vector3.new(4000, 4000, 4000)
+				Swim.Parent = Root
+			end
+
+			-- Calculate swimming velocity
+			local swimVelocity = Humanoid.MoveDirection * Humanoid.WalkSpeed
+
+			-- Add upward buoyancy force
+			local buoyancy = 0
+			if Root.Position.Y < waterSurface - 2 then
+				buoyancy = 8
+			else
+				buoyancy = 4
+			end
+
+			swimVelocity = swimVelocity + Vector3.new(0, buoyancy, 0)
+
+			-- Add jump for swimming up
+			if Humanoid.Jump then
+				swimVelocity = swimVelocity + Vector3.new(0, 12, 0)
+				Humanoid.Jump = false
+			end
+
+			Swim.Velocity = swimVelocity
+
+			-- Force swimming state
+			if Humanoid:GetState() ~= Enum.HumanoidStateType.Swimming then
+				Humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, false)
+				Humanoid:ChangeState(Enum.HumanoidStateType.Swimming)
+			end
+
+		else
+			-- Hide underwater overlay
+			overlay.Visible = false
+
+			-- Player is not in water
+			if Swim then
+				Swim:Destroy()
+				Swim = nil
+				Humanoid:SetStateEnabled(Enum.HumanoidStateType.GettingUp, true)
+				print("Stopped swimming")
+			end
+		end
+	end)
+
+	-- Clean up when character is removed
+	character.AncestryChanged:Connect(function()
+		if not character.Parent then
+			connection:Disconnect()
+			if Swim then
+				Swim:Destroy()
+			end
+		end
+	end)
+end
+
+-- Connect to current and future characters
+if player.Character then
+	onCharacterAdded(player.Character)
+end
+player.CharacterAdded:Connect(onCharacterAdded)
