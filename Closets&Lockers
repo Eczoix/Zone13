@@ -1,0 +1,201 @@
+local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
+
+local TWEEN_INFO = TweenInfo.new(0.8)
+local OPEN_ANGLE = math.rad(90)
+local CLOSE_ANGLE = math.rad(0)
+
+-- Sound IDs
+local OPEN_SOUND_ID = "rbxassetid://125209584906878"
+local CLOSE_SOUND_ID = "rbxassetid://157167205"
+
+-- Function to create a sound
+local function createSound(parent, soundId)
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = 0.5
+	sound.EmitterSize = 3
+	sound.MaxDistance = 15
+	sound.Parent = parent
+	return sound
+end
+
+-- Function to setup a single closet
+local function setupCloset(closetModel)
+	-- Get the Doors folder
+	local doorsFolder = closetModel:FindFirstChild("Doors")
+	if not doorsFolder then
+		warn("Closet model missing Doors folder:", closetModel:GetFullName())
+		return
+	end
+
+	-- Get parts from the Doors folder
+	local hingeOne = doorsFolder:FindFirstChild("HingeOne")
+	local hingeTwo = doorsFolder:FindFirstChild("HingeTwo")
+	local promptPartOne = doorsFolder:FindFirstChild("Proxpromptpart")
+	local promptPartTwo = doorsFolder:FindFirstChild("ProxpromptpartTwo")
+
+	-- Validate all parts exist
+	if not (hingeOne and hingeTwo and promptPartOne and promptPartTwo) then
+		warn("Closet model missing required parts:", closetModel:GetFullName())
+		return
+	end
+
+	local promptOne = promptPartOne:FindFirstChild("ProximityPrompt")
+	local promptTwo = promptPartTwo:FindFirstChild("ProximityPrompt")
+
+	if not (promptOne and promptTwo) then
+		warn("Closet model missing ProximityPrompts:", closetModel:GetFullName())
+		return
+	end
+
+	-- Create sounds
+	local openSound = createSound(closetModel, OPEN_SOUND_ID)
+	local closeSound = createSound(closetModel, CLOSE_SOUND_ID)
+
+	-- Store initial CFrames
+	local hingeOneCFrame = hingeOne.CFrame
+	local hingeTwoCFrame = hingeTwo.CFrame
+
+	-- Create tween goals
+	local goalOpenOne = {CFrame = hingeOneCFrame * CFrame.Angles(0, OPEN_ANGLE, 0)}
+	local goalOpenTwo = {CFrame = hingeTwoCFrame * CFrame.Angles(0, -OPEN_ANGLE, 0)}
+	local goalCloseOne = {CFrame = hingeOneCFrame * CFrame.Angles(0, CLOSE_ANGLE, 0)}
+	local goalCloseTwo = {CFrame = hingeTwoCFrame * CFrame.Angles(0, CLOSE_ANGLE, 0)}
+
+	-- Create tweens
+	local tweenOpenOne = TweenService:Create(hingeOne, TWEEN_INFO, goalOpenOne)
+	local tweenOpenTwo = TweenService:Create(hingeTwo, TWEEN_INFO, goalOpenTwo)
+	local tweenCloseOne = TweenService:Create(hingeOne, TWEEN_INFO, goalCloseOne)
+	local tweenCloseTwo = TweenService:Create(hingeTwo, TWEEN_INFO, goalCloseTwo)
+
+	-- Track state (true = open, false = closed)
+	local isOpen = false
+
+	-- Function to toggle closet
+	local function toggleCloset()
+		if isOpen then
+			-- Close
+			tweenCloseOne:Play()
+			tweenCloseTwo:Play()
+			closeSound:Play()
+			promptOne.ActionText = "Open"
+			promptTwo.ActionText = "Open"
+			isOpen = false
+		else
+			-- Open
+			tweenOpenOne:Play()
+			tweenOpenTwo:Play()
+			openSound:Play()
+			promptOne.ActionText = "Close"
+			promptTwo.ActionText = "Close"
+			isOpen = true
+		end
+	end
+
+	-- Connect both prompts to the same function
+	promptOne.Triggered:Connect(toggleCloset)
+	promptTwo.Triggered:Connect(toggleCloset)
+
+	print("Closet setup complete:", closetModel:GetFullName())
+end
+
+-- Setup all existing closets
+for _, closet in ipairs(CollectionService:GetTagged("Closet")) do
+	setupCloset(closet)
+end
+
+-- Setup any closets added later
+CollectionService:GetInstanceAddedSignal("Closet"):Connect(setupCloset)
+
+-- Cleanup when closets are removed
+CollectionService:GetInstanceRemovedSignal("Closet"):Connect(function(closet)
+	print("Closet removed:", closet:GetFullName())
+end)
+
+-- ============================================
+-- LOCKER SYSTEM
+-- ============================================
+-- Function to setup a single locker
+local function setupLocker(lockerModel)
+	-- Find CoolDown parts
+	local coolDown1 = lockerModel:FindFirstChild("CoolDown1")
+	local coolDown2 = lockerModel:FindFirstChild("CoolDown2")
+
+	if not (coolDown1 and coolDown2) then
+		warn("Locker model missing CoolDown1 or CoolDown2:", lockerModel:GetFullName())
+		return
+	end
+
+	-- Find the ProximityPrompt inside CoolDown1 → Part
+	local promptPart = coolDown1:FindFirstChild("Part")
+	local prompt
+
+	if promptPart then
+		prompt = promptPart:FindFirstChild("ProximityPrompt")
+	end
+
+	if not prompt then
+		warn("Locker model missing ProximityPrompt in CoolDown1/Part:", lockerModel:GetFullName())
+		return
+	end
+
+	-- ADDED: create sounds for this locker using your locker-specific sound IDs
+	local openSound = createSound(lockerModel, "rbxassetid://9119634456")   -- LOCKER open sound (was using closet sound before)
+	local closeSound = createSound(lockerModel, "rbxassetid://9126003290")  -- LOCKER close sound
+
+	-- Track state
+	local isOpen = false
+
+	-- Function to toggle locker
+	local function toggleLocker()
+		if isOpen then
+			-- Close
+			coolDown1.Transparency = 0
+			coolDown1.CanCollide = true
+			coolDown1.CanQuery = true  -- blocks loot again
+
+			coolDown2.Transparency = 1
+			coolDown2.CanCollide = false
+			coolDown2.CanQuery = false
+
+			if closeSound then closeSound:Play() end
+			prompt.ActionText = "Open"
+			prompt.ObjectText = "Open The Locker"
+			isOpen = false
+		else
+			-- Open
+			coolDown1.Transparency = 1
+			coolDown1.CanCollide = false
+			coolDown1.CanQuery = false  -- 🔥 fixes loot blocking issue
+
+			coolDown2.Transparency = 0
+			coolDown2.CanCollide = false
+			coolDown2.CanQuery = false
+
+			if openSound then openSound:Play() end
+			prompt.ActionText = "Close"
+			prompt.ObjectText = "Close The Locker"
+			isOpen = true
+		end
+	end
+
+
+	-- Connect prompt
+	prompt.Triggered:Connect(toggleLocker)
+
+	print("Locker setup complete:", lockerModel:GetFullName())
+end
+
+-- Setup all existing lockers
+for _, locker in ipairs(CollectionService:GetTagged("Locker")) do
+	setupLocker(locker)
+end
+
+-- Setup any lockers added later
+CollectionService:GetInstanceAddedSignal("Locker"):Connect(setupLocker)
+
+-- Cleanup when lockers are removed
+CollectionService:GetInstanceRemovedSignal("Locker"):Connect(function(locker)
+	print("Locker removed:", locker:GetFullName())
+end)	
