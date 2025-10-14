@@ -1,0 +1,406 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Wait for remote events
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+local timeUpdateRemote = remotes:WaitForChild("TimeUpdate")
+local dayNightChangeRemote = remotes:WaitForChild("DayNightChange")
+local gameStateRequestRemote = remotes:WaitForChild("GameStateRequest")
+
+-- Create main UI
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "LastLightHUD"
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+screenGui.Parent = playerGui
+screenGui.IgnoreGuiInset = true  -- Ignore Roblox top bar inset to place UI flush at top
+
+-- Main container with glassmorphism effect (using scale instead of offset)
+local mainContainer = Instance.new("Frame")
+mainContainer.Name = "TimeContainer"
+mainContainer.Size = UDim2.new(0.26, 0, 0.12, 0) -- Scale: ~26% width, 12% height (adjust these values if needed)
+mainContainer.Position = UDim2.new(0.5, 0, 0, 0) -- Top center using scale
+mainContainer.AnchorPoint = Vector2.new(0.5, 0) -- Center anchor point for X
+mainContainer.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+mainContainer.BackgroundTransparency = 0.15
+mainContainer.BorderSizePixel = 0
+mainContainer.Parent = screenGui
+
+-- Add UIAspectRatioConstraint to maintain proportions
+local aspectRatio = Instance.new("UIAspectRatioConstraint")
+aspectRatio.AspectRatio = 5.56 -- 500/90 = 5.56 (original width/height ratio)
+aspectRatio.Parent = mainContainer
+
+-- Glassmorphism corner
+local mainCorner = Instance.new("UICorner")
+mainCorner.CornerRadius = UDim.new(0.18, 0) -- Scale-based corner radius
+mainCorner.Parent = mainContainer
+
+-- Subtle gradient overlay
+local gradient = Instance.new("UIGradient")
+gradient.Color = ColorSequence.new{
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 25, 35)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 15))
+}
+gradient.Rotation = 45
+gradient.Parent = mainContainer
+
+-- Inner glow effect
+local innerGlow = Instance.new("Frame")
+innerGlow.Name = "InnerGlow"
+innerGlow.Size = UDim2.new(1, -4, 1, -4)
+innerGlow.Position = UDim2.new(0, 2, 0, 2)
+innerGlow.BackgroundTransparency = 1
+innerGlow.BorderSizePixel = 0
+innerGlow.Parent = mainContainer
+
+local glowStroke = Instance.new("UIStroke")
+glowStroke.Color = Color3.fromRGB(255, 255, 255)
+glowStroke.Transparency = 0.85
+glowStroke.Thickness = 1
+glowStroke.Parent = innerGlow
+
+local glowCorner = Instance.new("UICorner")
+glowCorner.CornerRadius = UDim.new(0.16, 0) -- Scale-based corner radius
+glowCorner.Parent = innerGlow
+
+-- Content frame with padding (using scale)
+local contentFrame = Instance.new("Frame")
+contentFrame.Size = UDim2.new(0.96, 0, 0.78, 0) -- Scale: 96% width, 78% height of container
+contentFrame.Position = UDim2.new(0.02, 0, 0.11, 0) -- Scale: 2% from left, 11% from top
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainContainer
+
+-- Survival status indicator
+local statusContainer = Instance.new("Frame")
+statusContainer.Name = "StatusContainer"
+statusContainer.Size = UDim2.new(1, 0, 0.3, 0)
+statusContainer.BackgroundTransparency = 1
+statusContainer.Parent = contentFrame
+
+-- Day counter with premium styling
+local dayContainer = Instance.new("Frame")
+dayContainer.Size = UDim2.new(0.3, 0, 1, 0)
+dayContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+dayContainer.BackgroundTransparency = 0.9
+dayContainer.BorderSizePixel = 0
+dayContainer.Parent = statusContainer
+
+local dayCorner = Instance.new("UICorner")
+dayCorner.CornerRadius = UDim.new(0.3, 0) -- Scale-based corner radius
+dayCorner.Parent = dayContainer
+
+local dayLabel = Instance.new("TextLabel")
+dayLabel.Name = "DayLabel"
+dayLabel.Size = UDim2.new(0.9, 0, 1, 0) -- Scale-based size
+dayLabel.Position = UDim2.new(0.05, 0, 0, 0) -- Scale-based position
+dayLabel.BackgroundTransparency = 1
+dayLabel.Text = "DAY 1"
+dayLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+dayLabel.TextScaled = true
+dayLabel.Font = Enum.Font.GothamBold
+dayLabel.TextXAlignment = Enum.TextXAlignment.Center
+dayLabel.Parent = dayContainer
+
+-- Add text size constraint for better mobile scaling
+local dayTextConstraint = Instance.new("UITextSizeConstraint")
+dayTextConstraint.MaxTextSize = 24
+dayTextConstraint.MinTextSize = 8
+dayTextConstraint.Parent = dayLabel
+
+-- Status indicator (ALIVE/DANGER)
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Name = "StatusLabel"
+statusLabel.Size = UDim2.new(0.55, 0, 1, 0) -- Scale-based size
+statusLabel.Position = UDim2.new(0.35, 0, 0, 0)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "● Day"
+statusLabel.TextColor3 = Color3.fromRGB(46, 204, 113)
+statusLabel.TextScaled = true
+statusLabel.Font = Enum.Font.GothamMedium
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = statusContainer
+
+local statusTextConstraint = Instance.new("UITextSizeConstraint")
+statusTextConstraint.MaxTextSize = 20
+statusTextConstraint.MinTextSize = 8
+statusTextConstraint.Parent = statusLabel
+
+-- Time phase display
+local timePhaseContainer = Instance.new("Frame")
+timePhaseContainer.Size = UDim2.new(1, 0, 0.28, 0)
+timePhaseContainer.Position = UDim2.new(0, 0, 0.35, 0)
+timePhaseContainer.BackgroundTransparency = 1
+timePhaseContainer.Parent = contentFrame
+
+-- Current time phase
+local timePhaseLabel = Instance.new("TextLabel")
+timePhaseLabel.Name = "TimePhaseLabel"
+timePhaseLabel.Size = UDim2.new(0.6, 0, 1, 0)
+timePhaseLabel.BackgroundTransparency = 1
+timePhaseLabel.Text = "DAWN"
+timePhaseLabel.TextColor3 = Color3.fromRGB(255, 182, 91)
+timePhaseLabel.TextScaled = true
+timePhaseLabel.Font = Enum.Font.GothamBold
+timePhaseLabel.TextXAlignment = Enum.TextXAlignment.Left
+timePhaseLabel.Parent = timePhaseContainer
+
+local phaseTextConstraint = Instance.new("UITextSizeConstraint")
+phaseTextConstraint.MaxTextSize = 22
+phaseTextConstraint.MinTextSize = 8
+phaseTextConstraint.Parent = timePhaseLabel
+
+-- Time remaining with icon
+local timeRemainingLabel = Instance.new("TextLabel")
+timeRemainingLabel.Name = "TimeRemainingLabel"
+timeRemainingLabel.Size = UDim2.new(0.4, 0, 1, 0)
+timeRemainingLabel.Position = UDim2.new(0.6, 0, 0, 0)
+timeRemainingLabel.BackgroundTransparency = 1
+timeRemainingLabel.Text = "⏰ 5:00"
+timeRemainingLabel.TextColor3 = Color3.fromRGB(200, 200, 220)
+timeRemainingLabel.TextScaled = true
+timeRemainingLabel.Font = Enum.Font.GothamMedium
+timeRemainingLabel.TextXAlignment = Enum.TextXAlignment.Right
+timeRemainingLabel.Parent = timePhaseContainer
+
+local remainingTextConstraint = Instance.new("UITextSizeConstraint")
+remainingTextConstraint.MaxTextSize = 18
+remainingTextConstraint.MinTextSize = 8
+remainingTextConstraint.Parent = timeRemainingLabel
+
+-- Advanced progress bar system
+local progressContainer = Instance.new("Frame")
+progressContainer.Size = UDim2.new(1, 0, 0.22, 0)
+progressContainer.Position = UDim2.new(0, 0, 0.65, 0)
+progressContainer.BackgroundTransparency = 1
+progressContainer.Parent = contentFrame
+
+-- Progress bar track
+local progressTrack = Instance.new("Frame")
+progressTrack.Size = UDim2.new(1, 0, 0.6, 0)
+progressTrack.Position = UDim2.new(0, 0, 0.2, 0)
+progressTrack.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+progressTrack.BorderSizePixel = 0
+progressTrack.Parent = progressContainer
+
+local trackCorner = Instance.new("UICorner")
+trackCorner.CornerRadius = UDim.new(0.5, 0) -- Scale-based corner radius
+trackCorner.Parent = progressTrack
+
+-- Progress bar fill with gradient
+local progressFill = Instance.new("Frame")
+progressFill.Name = "ProgressFill"
+progressFill.Size = UDim2.new(0.5, 0, 1, 0)
+progressFill.BackgroundColor3 = Color3.fromRGB(255, 182, 91)
+progressFill.BorderSizePixel = 0
+progressFill.Parent = progressTrack
+
+local fillCorner = Instance.new("UICorner")
+fillCorner.CornerRadius = UDim.new(0.5, 0) -- Scale-based corner radius
+fillCorner.Parent = progressFill
+
+-- Animated gradient for progress bar
+local progressGradient = Instance.new("UIGradient")
+progressGradient.Color = ColorSequence.new{
+	ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 182, 91)),
+	ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 215, 0)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 182, 91))
+}
+progressGradient.Rotation = 45
+progressGradient.Parent = progressFill
+
+-- Progress glow effect
+local progressGlow = Instance.new("Frame")
+progressGlow.Size = UDim2.new(1, 4, 1, 4)
+progressGlow.Position = UDim2.new(0, -2, 0, -2)
+progressGlow.BackgroundTransparency = 1
+progressGlow.Parent = progressFill
+
+local glowEffect = Instance.new("UIStroke")
+glowEffect.Color = Color3.fromRGB(255, 182, 91)
+glowEffect.Transparency = 0.7
+glowEffect.Thickness = 2
+glowEffect.Parent = progressGlow
+
+local progressGlowCorner = Instance.new("UICorner")
+progressGlowCorner.CornerRadius = UDim.new(0.5, 0) -- Scale-based corner radius
+progressGlowCorner.Parent = progressGlow
+
+-- Animate the gradient continuously
+spawn(function()
+	while true do
+		local tween1 = TweenService:Create(progressGradient, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {Rotation = 90})
+		local tween2 = TweenService:Create(progressGradient, TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {Rotation = 45})
+
+		tween1:Play()
+		tween1.Completed:Wait()
+		tween2:Play()
+		tween2.Completed:Wait()
+	end
+end)
+
+-- Floating entrance animation
+local function playEntranceAnimation()
+	-- Start off-screen left, using scale for positioning
+	mainContainer.Position = UDim2.new(-0.3, 0, 0, 0) -- Start at -30% X position
+	mainContainer.BackgroundTransparency = 1
+
+	local slideIn = TweenService:Create(mainContainer, TweenInfo.new(1, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out), {
+		Position = UDim2.new(0.5, 0, 0, 0) -- Slide to center (50% X position)
+	})
+
+	local fadeIn = TweenService:Create(mainContainer, TweenInfo.new(0.8, Enum.EasingStyle.Exponential), {
+		BackgroundTransparency = 0.15
+	})
+
+	slideIn:Play()
+	wait(0.2)
+	fadeIn:Play()
+end
+
+-- Format time with better styling
+local function formatTime(seconds)
+	local minutes = math.floor(seconds / 60)
+	local remainingSeconds = seconds % 60
+	return string.format("⏰ %d:%02d", minutes, remainingSeconds)
+end
+
+-- Color schemes for different times of day
+local timeColors = {
+	Dawn = {
+		primary = Color3.fromRGB(255, 182, 91),
+		secondary = Color3.fromRGB(255, 215, 0),
+		glow = Color3.fromRGB(255, 182, 91)
+	},
+	Day = {
+		primary = Color3.fromRGB(255, 215, 0),
+		secondary = Color3.fromRGB(255, 255, 100),
+		glow = Color3.fromRGB(255, 215, 0)
+	},
+	Dusk = {
+		primary = Color3.fromRGB(255, 99, 71),
+		secondary = Color3.fromRGB(255, 140, 0),
+		glow = Color3.fromRGB(255, 99, 71)
+	},
+	Night = {
+		primary = Color3.fromRGB(138, 177, 255),
+		secondary = Color3.fromRGB(100, 149, 237),
+		glow = Color3.fromRGB(138, 177, 255)
+	}
+}
+
+-- Declare tween variables to fix the error
+local colorTween1, colorTween2, colorTween3, fillTween
+
+-- Update UI with enhanced animations
+local function updateTimeDisplay(gameState)
+	-- Update text content
+	dayLabel.Text = "DAY " .. gameState.currentDay
+	timePhaseLabel.Text = gameState.timeOfDay:upper()
+	timeRemainingLabel.Text = formatTime(gameState.timeRemaining)
+
+	-- Get color scheme
+	local colors = timeColors[gameState.timeOfDay] or timeColors.Day
+
+	-- Cancel previous tweens if they exist and are playing
+	if colorTween1 and colorTween1.PlaybackState == Enum.PlaybackState.Playing then
+		colorTween1:Cancel()
+	end
+	if colorTween2 and colorTween2.PlaybackState == Enum.PlaybackState.Playing then
+		colorTween2:Cancel()
+	end
+	if colorTween3 and colorTween3.PlaybackState == Enum.PlaybackState.Playing then
+		colorTween3:Cancel()
+	end
+	if fillTween and fillTween.PlaybackState == Enum.PlaybackState.Playing then
+		fillTween:Cancel()
+	end
+
+	-- Create new tweens
+	colorTween1 = TweenService:Create(timePhaseLabel, TweenInfo.new(1.5), {TextColor3 = colors.primary})
+	colorTween2 = TweenService:Create(progressFill, TweenInfo.new(1.5), {BackgroundColor3 = colors.primary})
+	colorTween3 = TweenService:Create(glowEffect, TweenInfo.new(1.5), {Color = colors.glow})
+
+	colorTween1:Play()
+	colorTween2:Play()
+	colorTween3:Play()
+
+	-- Update progress bar with smooth animation
+	local targetSize = UDim2.new(gameState.cycleProgress, 0, 1, 0)
+	fillTween = TweenService:Create(progressFill, TweenInfo.new(2, Enum.EasingStyle.Quad), {Size = targetSize})
+	fillTween:Play()
+
+	-- Update status based on time
+	if gameState.isNight then
+		statusLabel.Text = "● DANGER"
+		statusLabel.TextColor3 = Color3.fromRGB(231, 76, 60)
+
+		-- Pulse effect for danger
+		spawn(function()
+			while gameState.isNight do
+				TweenService:Create(statusLabel, TweenInfo.new(1), {TextTransparency = 0.3}):Play()
+				wait(1)
+				TweenService:Create(statusLabel, TweenInfo.new(1), {TextTransparency = 0}):Play()
+				wait(1)
+			end
+		end)
+	else
+		statusLabel.Text = "● Day"
+		statusLabel.TextColor3 = Color3.fromRGB(46, 204, 113)
+		statusLabel.TextTransparency = 0
+	end
+end
+
+-- Enhanced day/night transition effects
+dayNightChangeRemote.OnClientEvent:Connect(function(data)
+	-- Screen flash effect
+	local flashFrame = Instance.new("Frame")
+	flashFrame.Size = UDim2.new(1, 0, 1, 0)
+	flashFrame.BackgroundColor3 = data.isNight and Color3.fromRGB(138, 177, 255) or Color3.fromRGB(255, 215, 0)
+	flashFrame.BackgroundTransparency = 0.7
+	flashFrame.BorderSizePixel = 0
+	flashFrame.ZIndex = 10
+	flashFrame.Parent = mainContainer
+
+	-- Container pulse using scale
+	local originalSize = mainContainer.Size
+	local pulseOut = TweenService:Create(mainContainer, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+		Size = UDim2.new(originalSize.X.Scale * 1.04, 0, originalSize.Y.Scale * 1.11, 0) -- 4% wider, 11% taller
+	})
+	local pulseIn = TweenService:Create(mainContainer, TweenInfo.new(0.4, Enum.EasingStyle.Back), {
+		Size = originalSize
+	})
+
+	-- Flash fade
+	local flashTween = TweenService:Create(flashFrame, TweenInfo.new(1.5, Enum.EasingStyle.Exponential), {BackgroundTransparency = 1})
+
+	-- Execute animations
+	pulseOut:Play()
+	flashTween:Play()
+
+	pulseOut.Completed:Connect(function()
+		pulseIn:Play()
+	end)
+
+	flashTween.Completed:Connect(function()
+		flashFrame:Destroy()
+	end)
+
+	print(data.isNight and "[Client] Night has fallen..." or "[Client] Dawn breaks!")
+end)
+
+-- Handle time updates
+timeUpdateRemote.OnClientEvent:Connect(updateTimeDisplay)
+
+-- Initialize with entrance animation
+playEntranceAnimation()
+
+-- Request initial game state
+wait(1)
+gameStateRequestRemote:FireServer()
+
+print("[Client] Premium Time Display initialized")
