@@ -1,0 +1,210 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
+
+local player = Players.LocalPlayer
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+
+local isSprinting = false
+
+-- Function to setup the HUD
+local function setupHUD()
+	-- Check if HUD already exists (prevents duplicates on respawn)
+	local existing = player:FindFirstChild("PlayerGui"):FindFirstChild("SurvivalHUD")
+	if existing then
+		existing:Destroy()
+	end
+
+	-- Create ScreenGui
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "SurvivalHUD"
+	gui.IgnoreGuiInset = true
+	gui.ResetOnSpawn = false -- <- PERSISTENT ACROSS RESPAWN
+	gui.Parent = player:WaitForChild("PlayerGui")
+
+	-- Main container with scale-based sizing and positioning
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Size = UDim2.new(0.25, 0, 0.16, 0) -- Increased height to fit stamina bar
+	mainFrame.Position = UDim2.new(0.02, 0, 0.81, 0) -- Adjusted position
+	mainFrame.BackgroundColor3 = Color3.fromRGB(0,0,0)
+	mainFrame.BackgroundTransparency = 0.3
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0.05, 0) -- Scale-based corner radius
+	corner.Parent = mainFrame
+
+	-- Function to create a bar
+	local function createBar(name, yPos, defaultColor, emoji)
+		local barFrame = Instance.new("Frame")
+		barFrame.Size = UDim2.new(0.95, 0, 0.28, 0) -- Adjusted height for 3 bars
+		barFrame.Position = UDim2.new(0.025, 0, yPos, 0)
+		barFrame.BackgroundTransparency = 1
+		barFrame.Parent = mainFrame
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(0.42, 0, 1, 0)
+		label.Position = UDim2.new(0, 0, 0, 0)
+		label.BackgroundTransparency = 1
+		label.Font = Enum.Font.GothamBold
+		label.TextScaled = true
+		label.Text = emoji.." "..name:upper()
+		label.TextColor3 = defaultColor
+		label.Parent = barFrame
+
+		local bgBar = Instance.new("Frame")
+		bgBar.Size = UDim2.new(0.53, 0, 0.65, 0)
+		bgBar.Position = UDim2.new(0.46, 0, 0.175, 0)
+		bgBar.BackgroundColor3 = Color3.fromRGB(40,40,40)
+		bgBar.BorderSizePixel = 0
+		bgBar.Parent = barFrame
+
+		local bgCorner = Instance.new("UICorner")
+		bgCorner.CornerRadius = UDim.new(0.3, 0)
+		bgCorner.Parent = bgBar
+
+		local fill = Instance.new("Frame")
+		fill.Size = UDim2.new(1,0,1,0)
+		fill.BackgroundColor3 = defaultColor
+		fill.BorderSizePixel = 0
+		fill.Parent = bgBar
+
+		local fillCorner = Instance.new("UICorner")
+		fillCorner.CornerRadius = UDim.new(0.3, 0)
+		fillCorner.Parent = fill
+
+		local function updateBar(current,max)
+			local percent = math.clamp(current/max,0,1)
+			local targetColor = defaultColor
+
+			if name=="Hunger" then
+				targetColor = Color3.fromRGB(
+					math.floor(255*(1-percent)),
+					math.floor(200*percent),
+					0
+				)
+			elseif name=="Health" then
+				targetColor = Color3.fromRGB(200,50,50)
+			elseif name=="Stamina" then
+				targetColor = Color3.fromRGB(50,50,200) -- Blue color for stamina
+			end
+
+			if percent<=0.2 then
+				label.Text = emoji.." LOW ON "..name:upper()
+				label.TextColor3 = Color3.fromRGB(255,0,0)
+			else
+				label.Text = emoji.." "..name:upper()
+				label.TextColor3 = targetColor
+			end
+
+			TweenService:Create(
+				fill,
+				TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out),
+				{Size=UDim2.new(percent,0,1,0), BackgroundColor3=targetColor}
+			):Play()
+		end
+
+		return updateBar
+	end
+
+	-- Create bars with adjusted positioning for 3 bars
+	local updateHealth = createBar("Health", 0.05, Color3.fromRGB(200,50,50), "❤️")
+	local updateHunger = createBar("Hunger", 0.37, Color3.fromRGB(50,200,50), "🍗") 
+	local updateStamina = createBar("Stamina", 0.69, Color3.fromRGB(50,50,200), "🏃") -- Running man emoji
+
+	-- Create mobile sprint button (only visible on mobile)
+	local sprintButton = Instance.new("ImageButton")
+	sprintButton.Name = "SprintButton"
+	sprintButton.Size = UDim2.new(0, 100, 0, 35) -- Thin rectangular button
+	sprintButton.Position = UDim2.new(1, -110, 1, -200) -- More to the right
+	sprintButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+	sprintButton.BackgroundTransparency = 0.1
+	sprintButton.BorderSizePixel = 0
+	sprintButton.Image = ""
+	sprintButton.Parent = gui
+
+	-- Sprint button styling with rounded corners
+	local sprintCorner = Instance.new("UICorner")
+	sprintCorner.CornerRadius = UDim.new(0.2, 0) -- Slightly rounded corners
+	sprintCorner.Parent = sprintButton
+
+	-- Add border/stroke effect
+	local sprintStroke = Instance.new("UIStroke")
+	sprintStroke.Color = Color3.fromRGB(200, 200, 200)
+	sprintStroke.Thickness = 2
+	sprintStroke.Parent = sprintButton
+
+	local sprintLabel = Instance.new("TextLabel")
+	sprintLabel.Size = UDim2.new(1, 0, 1, 0)
+	sprintLabel.BackgroundTransparency = 1
+	sprintLabel.Text = "SPRINT"
+	sprintLabel.TextScaled = true
+	sprintLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+	sprintLabel.Font = Enum.Font.GothamBold
+	sprintLabel.Parent = sprintButton
+
+	-- Hide sprint button on PC, show on mobile/touch devices
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+		sprintButton.Visible = true
+	else
+		sprintButton.Visible = false
+	end
+
+	-- Sprint functions
+	local function startSprint()
+		if not isSprinting then
+			isSprinting = true
+			remotes.StartSprint:FireServer()
+			-- Visual feedback - make button green when active
+			sprintButton.BackgroundColor3 = Color3.fromRGB(100, 200, 100) -- Green when active
+			sprintStroke.Color = Color3.fromRGB(150, 255, 150) -- Bright green stroke
+		end
+	end
+
+	local function stopSprint()
+		if isSprinting then
+			isSprinting = false
+			remotes.StopSprint:FireServer()
+			-- Visual feedback - return to normal colors
+			sprintButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80) -- Gray when inactive
+			sprintStroke.Color = Color3.fromRGB(200, 200, 200) -- Normal stroke
+		end
+	end
+
+	-- Mobile sprint button input (hold to sprint)
+	sprintButton.MouseButton1Down:Connect(startSprint)
+	sprintButton.MouseButton1Up:Connect(stopSprint)
+	sprintButton.MouseLeave:Connect(stopSprint) -- Stop sprinting if finger leaves button
+
+	-- PC sprint input (hold Left Control to sprint)
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.KeyCode == Enum.KeyCode.LeftControl then
+			startSprint()
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.KeyCode == Enum.KeyCode.LeftControl then
+			stopSprint()
+		end
+	end)
+
+	-- Connect to remotes
+	remotes.UpdateHealthUI.OnClientEvent:Connect(updateHealth)
+	remotes.UpdateHungerUI.OnClientEvent:Connect(updateHunger)
+	remotes.UpdateStaminaUI.OnClientEvent:Connect(updateStamina)
+end
+
+-- Initial HUD setup
+setupHUD()
+
+-- Re-setup HUD on respawn
+player.CharacterAdded:Connect(function()
+	isSprinting = false -- Reset sprint state on respawn
+	setupHUD()
+end)
