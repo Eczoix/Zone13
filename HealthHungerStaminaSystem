@@ -1,0 +1,191 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+local foodFolder = ReplicatedStorage:WaitForChild("FoodItems")
+local spawnFolder = Workspace:WaitForChild("FoodSpawnPoints")
+
+-- CONFIG
+local MAX_HUNGER = 100
+local HUNGER_DRAIN_RATE = 0.3
+local DRAIN_INTERVAL = 3
+local STARVATION_DAMAGE = 5
+local STARVATION_INTERVAL = 2
+
+-- STAMINA CONFIG
+local MAX_STAMINA = 100
+local STAMINA_DRAIN_RATE = 15 -- Per second while sprinting
+local STAMINA_REGEN_RATE = 12 -- Per second while not sprinting (slower regeneration)
+local SPRINT_SPEED = 28 -- Speed when sprinting (faster)
+local NORMAL_SPEED = 16 -- Normal walking speed
+
+local foodList = {
+	["Canned Beans"] = 20,
+	["Pasta"] = 50,
+}
+
+-- STORE HUNGER AND STAMINA
+local playerHunger = {}
+local playerStamina = {}
+local playerSprinting = {}
+
+-- FUNCTION TO SET HUNGER
+local function setHunger(player, value)
+	playerHunger[player] = math.clamp(value, 0, MAX_HUNGER)
+	player:SetAttribute("Hunger", playerHunger[player])
+	remotes.UpdateHungerUI:FireClient(player, playerHunger[player], MAX_HUNGER)
+end
+
+-- FUNCTION TO SET STAMINA
+local function setStamina(player, value)
+	playerStamina[player] = math.clamp(value, 0, MAX_STAMINA)
+	player:SetAttribute("Stamina", playerStamina[player])
+	remotes.UpdateStaminaUI:FireClient(player, playerStamina[player], MAX_STAMINA)
+end
+
+-- HANDLE SPRINT STATE
+local function setSprint(player, sprinting)
+	if not player.Character then return end
+	local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	playerSprinting[player] = sprinting
+
+	if sprinting and playerStamina[player] > 0 then
+		humanoid.WalkSpeed = SPRINT_SPEED
+	else
+		humanoid.WalkSpeed = NORMAL_SPEED
+		if sprinting then
+			playerSprinting[player] = false -- Stop sprinting if out of stamina
+		end
+	end
+end
+
+-- PLAYER JOIN
+Players.PlayerAdded:Connect(function(player)
+	playerHunger[player] = MAX_HUNGER
+	playerStamina[player] = MAX_STAMINA
+	playerSprinting[player] = false
+
+	player:SetAttribute("Hunger", MAX_HUNGER)
+	player:SetAttribute("Stamina", MAX_STAMINA)
+
+	-- Hunger drain over time
+	task.spawn(function()
+		while player.Parent do
+			task.wait(DRAIN_INTERVAL)
+			setHunger(player, playerHunger[player] - HUNGER_DRAIN_RATE)
+		end
+	end)
+
+	-- Stamina system loop
+	task.spawn(function()
+		while player.Parent do
+			if playerSprinting[player] and playerStamina[player] > 0 then
+				-- Drain stamina while sprinting
+				setStamina(player, playerStamina[player] - STAMINA_DRAIN_RATE * 0.1) -- 0.1 = update rate
+
+				-- Stop sprinting if out of stamina
+				if playerStamina[player] <= 0 then
+					setSprint(player, false)
+				end
+			elseif not playerSprinting[player] and playerStamina[player] < MAX_STAMINA then
+				-- Regenerate stamina when not sprinting
+				setStamina(player, playerStamina[player] + STAMINA_REGEN_RATE * 0.1)
+			end
+			task.wait(0.1) -- Update 10 times per second for smooth stamina changes
+		end
+	end)
+
+	-- Starvation damage loop
+	task.spawn(function()
+		while player.Parent do
+			if playerHunger[player] <= 0 and player.Character then
+				local hum = player.Character:FindFirstChildOfClass("Humanoid")
+				if hum then
+					hum:TakeDamage(STARVATION_DAMAGE)
+				end
+			end
+			task.wait(STARVATION_INTERVAL)
+		end
+	end)
+
+	-- Track character for health updates
+	player.CharacterAdded:Connect(function(char)
+		local humanoid = char:WaitForChild("Humanoid")
+
+		-- Reset sprint state on respawn
+		playerSprinting[player] = false
+		humanoid.WalkSpeed = NORMAL_SPEED
+
+		-- Fire initial health and stamina
+		remotes.UpdateHealthUI:FireClient(player, humanoid.Health, humanoid.MaxHealth)
+		remotes.UpdateStaminaUI:FireClient(player, playerStamina[player], MAX_STAMINA)
+
+		-- Update health bar whenever health changes
+		humanoid.HealthChanged:Connect(function()
+			remotes.UpdateHealthUI:FireClient(player, humanoid.Health, humanoid.MaxHealth)
+		end)
+	end)
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+	playerHunger[player] = nil
+	playerStamina[player] = nil
+	playerSprinting[player] = nil
+end)
+
+-- SPRINT REMOTE EVENT HANDLERS
+remotes.StartSprint.OnServerEvent:Connect(function(player)
+	setSprint(player, true)
+end)
+
+remotes.StopSprint.OnServerEvent:Connect(function(player)
+	setSprint(player, false)
+end)
+
+-- FOOD SPAWNING (unchanged)
+local currentFood = {}
+local spawnInterval = 1
+local maxFoodInWorld = 20
+
+local function spawnFood(foodName, spawnPart)
+	local foodModel = foodFolder:FindFirstChild(foodName)
+	if not foodModel then return end
+	local clone = foodModel:Clone()
+	clone.Parent = Workspace
+	clone:SetPrimaryPartCFrame(spawnPart.CFrame + Vector3.new(0,2,0))
+	local part = clone.PrimaryPart
+	if not part:FindFirstChildOfClass("ProximityPrompt") then
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.ActionText = "Eat"
+		prompt.ObjectText = foodName
+		prompt.HoldDuration = 0.5
+		prompt.RequiresLineOfSight = false
+		prompt.Parent = part
+		prompt.Triggered:Connect(function(player)
+			-- Use main hunger function
+			setHunger(player, playerHunger[player] + (foodList[foodName] or 0))
+			clone:Destroy()
+			currentFood[clone] = nil
+		end)
+	end
+	currentFood[clone] = true
+end
+
+-- SPAWN LOOP
+task.spawn(function()
+	while true do
+		if #currentFood < maxFoodInWorld then
+			local foodNames = {}
+			for k in pairs(foodList) do table.insert(foodNames, k) end
+			local chosenFood = foodNames[math.random(1,#foodNames)]
+			local spawnParts = spawnFolder:GetChildren()
+			if #spawnParts > 0 then
+				local chosenPart = spawnParts[math.random(1,#spawnParts)]
+				spawnFood(chosenFood, chosenPart)
+			end
+		end
+		task.wait(spawnInterval)
+	end
+end)
