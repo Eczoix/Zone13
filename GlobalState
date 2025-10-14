@@ -1,0 +1,89 @@
+local GlobalState = {}
+
+-- Game State Variables
+GlobalState.isNight = false
+GlobalState.currentDay = 1
+
+-- Time Configuration
+GlobalState.DAY_LENGTH = 100      -- 10 minutes total cycle
+GlobalState.NIGHT_START = 0.75      -- Night starts at 75% through cycle
+GlobalState.NIGHT_END = 0.25        -- Night ends at 25% through cycle
+
+-- Shift start time to 30% into the cycle (dawn)
+GlobalState.gameStartTime = tick() - (GlobalState.DAY_LENGTH * 0.3)
+GlobalState.lastDayChange = tick()
+
+-- Events (create these as RemoteEvents in ReplicatedStorage)
+GlobalState.Events = {
+	"TimeUpdate",           -- Server -> Client time sync
+	"DayNightChange",       -- Server -> Client day/night toggle
+	"PlayerSpawned",        -- Client -> Server player ready
+	"GameStateRequest"      -- Client -> Server state request
+}
+
+-- Create RemoteEvents folder structure
+function GlobalState:InitializeRemotes()
+	local remoteFolder = game.ReplicatedStorage:FindFirstChild("GameRemotes")
+	if not remoteFolder then
+		remoteFolder = Instance.new("Folder")
+		remoteFolder.Name = "GameRemotes"
+		remoteFolder.Parent = game.ReplicatedStorage
+	end
+
+	for _, eventName in pairs(self.Events) do
+		if not remoteFolder:FindFirstChild(eventName) then
+			local remote = Instance.new("RemoteEvent")
+			remote.Name = eventName
+			remote.Parent = remoteFolder
+		end
+	end
+end
+
+-- Get current cycle progress (0-1)
+function GlobalState:GetCycleProgress()
+	local elapsed = (tick() - self.gameStartTime) % self.DAY_LENGTH
+	return elapsed / self.DAY_LENGTH
+end
+
+-- Check if it's currently night
+function GlobalState:IsNight()
+	local progress = self:GetCycleProgress()
+	return progress >= self.NIGHT_START or progress <= self.NIGHT_END
+end
+
+-- Get time remaining in current phase
+function GlobalState:GetTimeRemaining()
+	local progress = self:GetCycleProgress()
+	local timeLeft
+
+	if self:IsNight() then
+		-- Calculate time until dawn
+		if progress >= self.NIGHT_START then
+			timeLeft = (1 - progress + self.NIGHT_END) * self.DAY_LENGTH
+		else
+			timeLeft = (self.NIGHT_END - progress) * self.DAY_LENGTH
+		end
+	else
+		-- Calculate time until dusk
+		timeLeft = (self.NIGHT_START - progress) * self.DAY_LENGTH
+	end
+
+	return math.max(0, timeLeft)
+end
+
+-- Get current time of day string
+function GlobalState:GetTimeOfDay()
+	local progress = self:GetCycleProgress()
+
+	if progress < 0.25 then
+		return "Night"
+	elseif progress < 0.4 then
+		return "Dawn"
+	elseif progress < 0.75 then
+		return "Day"
+	else
+		return "Dusk"
+	end
+end
+
+return GlobalState
