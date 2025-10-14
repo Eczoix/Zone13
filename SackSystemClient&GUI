@@ -1,0 +1,542 @@
+-- ==========================================
+-- IMPROVED SACK SYSTEM - CLIENT SCRIPT
+-- Place in StarterPlayer > StarterPlayerScripts
+-- Name: SackSystemClient
+-- ==========================================
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local SoundService = game:GetService("SoundService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local mouse = player:GetMouse()
+
+print("[SACK CLIENT] Loading...")
+
+-- Wait for remotes
+local remoteFolder = ReplicatedStorage:WaitForChild("SackRemotes", 10)
+if not remoteFolder then
+	warn("[SACK CLIENT] Could not find SackRemotes folder!")
+	return
+end
+
+local collectRemote = remoteFolder:WaitForChild("CollectItem")
+local dropRemote = remoteFolder:WaitForChild("DropItem")
+local updateCountRemote = remoteFolder:WaitForChild("UpdateCount")
+local getItemsNearby = remoteFolder:WaitForChild("GetItemsNearby")
+
+-- Variables
+local sackEquipped = false
+local currentHighlight = nil
+local sackTool = nil
+local countGui = nil
+local currentCount = 0
+local maxCapacity = 5
+local mobileGui = nil
+local currentMobileTarget = nil
+local mobileButtons = {}
+
+-- Sound setup
+local dropSound = Instance.new("Sound")
+dropSound.SoundId = "rbxassetid://17779566040"
+dropSound.Volume = 1
+dropSound.Parent = SoundService
+
+-- Mobile detection
+local function isMobile()
+	return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+end
+
+print("[SACK CLIENT] Is Mobile Device:", isMobile())
+
+-- Create sack counter display
+local function createCounterGui(attachTo)
+	if countGui then
+		countGui:Destroy()
+	end
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "SackCounter"
+	billboard.Size = UDim2.new(2, 0, 1, 0)
+	billboard.StudsOffset = Vector3.new(0, 2, 0)
+	billboard.AlwaysOnTop = true
+	billboard.LightInfluence = 0
+	billboard.Adornee = attachTo
+	billboard.Parent = playerGui
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(1, 0, 1, 0)
+	frame.BackgroundColor3 = Color3.new(0, 0, 0)
+	frame.BackgroundTransparency = 0.3
+	frame.BorderSizePixel = 0
+	frame.Parent = billboard
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = frame
+
+	local label = Instance.new("TextLabel")
+	label.Name = "CountLabel"
+	label.Size = UDim2.new(1, 0, 1, 0)
+	label.BackgroundTransparency = 1
+	label.Text = currentCount .. "/" .. maxCapacity
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.Parent = frame
+
+	countGui = billboard
+	return billboard
+end
+
+-- Update counter
+local function updateCounter()
+	if countGui and countGui:FindFirstChild("Frame") then
+		local label = countGui.Frame:FindFirstChild("CountLabel")
+		if label then
+			label.Text = currentCount .. "/" .. maxCapacity
+
+			if currentCount >= maxCapacity then
+				label.TextColor3 = Color3.fromRGB(255, 100, 100)
+			else
+				label.TextColor3 = Color3.new(1, 1, 1)
+			end
+		end
+	end
+end
+
+-- Create mobile interaction GUI
+local function createMobileInteractionGui()
+	if mobileGui then
+		mobileGui:Destroy()
+	end
+
+	print("[SACK CLIENT] Creating mobile interaction GUI")
+
+	mobileGui = Instance.new("ScreenGui")
+	mobileGui.Name = "SackMobileUI"
+	mobileGui.ResetOnSpawn = false
+	mobileGui.Parent = playerGui
+
+	-- Store button (circular, matching your UI style)
+	local storeBtn = Instance.new("TextButton")
+	storeBtn.Name = "StoreButton"
+	storeBtn.Size = UDim2.new(0, 60, 0, 60)
+	storeBtn.Position = UDim2.new(1, -160, 1, -160)
+	storeBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	storeBtn.BackgroundTransparency = 0.3
+	storeBtn.BorderSizePixel = 2
+	storeBtn.BorderColor3 = Color3.fromRGB(100, 255, 100)
+	storeBtn.Text = "Store"
+	storeBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
+	storeBtn.TextSize = 14
+	storeBtn.Font = Enum.Font.GothamBold
+	storeBtn.Visible = false
+	storeBtn.Parent = mobileGui
+
+	local storeCorner = Instance.new("UICorner")
+	storeCorner.CornerRadius = UDim.new(0.5, 0)
+	storeCorner.Parent = storeBtn
+
+	-- Undrag/Drop button
+	local undragBtn = Instance.new("TextButton")
+	undragBtn.Name = "UndragButton"
+	undragBtn.Size = UDim2.new(0, 60, 0, 60)
+	undragBtn.Position = UDim2.new(1, -180, 1, -100)
+	undragBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	undragBtn.BackgroundTransparency = 0.3
+	undragBtn.BorderSizePixel = 2
+	undragBtn.BorderColor3 = Color3.fromRGB(255, 100, 100)
+	undragBtn.Text = "Unstore"
+	undragBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
+	undragBtn.TextSize = 14
+	undragBtn.Font = Enum.Font.GothamBold
+	undragBtn.Visible = false
+	undragBtn.Parent = mobileGui
+
+	local undragCorner = Instance.new("UICorner")
+	undragCorner.CornerRadius = UDim.new(0.5, 0)
+	undragCorner.Parent = undragBtn
+
+	-- Store button functionality
+	storeBtn.MouseButton1Click:Connect(function()
+		print("[SACK CLIENT] Store button clicked")
+		if currentMobileTarget and currentMobileTarget.Parent then
+			collectRemote:FireServer(currentMobileTarget)
+			storeBtn.Visible = false
+			currentMobileTarget = nil
+		end
+	end)
+
+	-- Drop button functionality (renamed from undragBtn to match button)
+	undragBtn.MouseButton1Click:Connect(function()
+		print("[SACK CLIENT] Drop button clicked")
+		if currentCount > 0 then
+			dropRemote:FireServer()
+			dropSound:Play()
+		end
+	end)
+
+	mobileButtons = {store = storeBtn, drop = undragBtn}
+	print("[SACK CLIENT] Mobile buttons created")
+
+	return mobileButtons
+end
+
+-- Mobile touch handler
+local function setupMobileTouch()
+	if not isMobile() then 
+		print("[SACK CLIENT] Not mobile, skipping touch setup")
+		return 
+	end
+
+	print("[SACK CLIENT] Setting up mobile touch controls")
+
+	-- Create the mobile GUI immediately
+	createMobileInteractionGui()
+
+	-- Touch detection for items
+	UserInputService.TouchTap:Connect(function(touchPositions, processed)
+		if processed or not sackEquipped then return end
+
+		print("[SACK CLIENT] Touch detected, sack equipped:", sackEquipped)
+
+		local touchPos = touchPositions[1]
+		local camera = workspace.CurrentCamera
+		local ray = camera:ScreenPointToRay(touchPos.X, touchPos.Y)
+
+		-- Use multiple raycasts to find collectable items
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+		raycastParams.FilterDescendantsInstances = {player.Character}
+
+		-- First, try a shorter raycast to prioritize closer objects
+		local rayResult = workspace:Raycast(ray.Origin, ray.Direction * 50, raycastParams)
+
+		-- If that didn't work, try a longer one
+		if not rayResult then
+			rayResult = workspace:Raycast(ray.Origin, ray.Direction * 200, raycastParams)
+		end
+
+		local allHits = {}
+
+		-- Collect multiple hits by filtering out what we've already hit
+		if rayResult then
+			table.insert(allHits, rayResult.Instance)
+
+			-- Try additional raycasts with different filters to catch items behind other objects
+			for i = 1, 3 do
+				local newParams = RaycastParams.new()
+				newParams.FilterType = Enum.RaycastFilterType.Exclude
+				newParams.FilterDescendantsInstances = {player.Character, unpack(allHits)}
+
+				local nextResult = workspace:Raycast(ray.Origin, ray.Direction * (50 + i * 50), newParams)
+				if nextResult then
+					table.insert(allHits, nextResult.Instance)
+				end
+			end
+		end
+
+		-- Also try proximity-based detection as backup
+		local character = player.Character
+		if character and character:FindFirstChild("HumanoidRootPart") then
+			local playerPos = character.HumanoidRootPart.Position
+			local collectables = CollectionService:GetTagged("Collectable")
+
+			-- Find nearby collectables and add them to potential hits
+			for _, item in pairs(collectables) do
+				local itemPos = nil
+				if item:IsA("Model") and item.PrimaryPart then
+					itemPos = item.PrimaryPart.Position
+				elseif item:IsA("BasePart") then
+					itemPos = item.Position
+				end
+
+				if itemPos then
+					local distance = (playerPos - itemPos).Magnitude
+					if distance <= 8 then -- Close proximity items
+						-- Check if this item is roughly in the direction of the touch
+						local dirToItem = (itemPos - playerPos).Unit
+						local touchDir = ray.Direction.Unit
+						local dot = dirToItem:Dot(touchDir)
+
+						if dot > 0.3 then -- Item is roughly in the touch direction
+							table.insert(allHits, item)
+						end
+					end
+				end
+			end
+		end
+
+		-- Now check all hits for collectable tags
+		local target = nil
+
+		for _, hit in pairs(allHits) do
+			print("[SACK CLIENT] Checking hit:", hit.Name, "Parent:", hit.Parent and hit.Parent.Name or "nil")
+
+			-- Search up the hierarchy for Collectable tag
+			local current = hit
+			while current and current ~= workspace do
+				if CollectionService:HasTag(current, "Collectable") then
+					target = current
+					print("[SACK CLIENT] Found Collectable tag on:", current.Name)
+					break
+				end
+				current = current.Parent
+			end
+
+			if target then break end
+		end
+
+		if target then
+			print("[SACK CLIENT] Found collectable target:", target.Name)
+
+			if character and character:FindFirstChild("HumanoidRootPart") then
+				local itemPos = nil
+				if target:IsA("Model") and target.PrimaryPart then
+					itemPos = target.PrimaryPart.Position
+				elseif target:IsA("BasePart") then
+					itemPos = target.Position
+				end
+
+				if itemPos then
+					local distance = (character.HumanoidRootPart.Position - itemPos).Magnitude
+					print("[SACK CLIENT] Distance to item:", distance)
+
+					if distance <= 15 then
+						currentMobileTarget = target
+						if mobileButtons and mobileButtons.store then
+							mobileButtons.store.Visible = true
+							print("[SACK CLIENT] Store button made visible")
+
+							-- Auto-hide after 5 seconds
+							task.spawn(function()
+								task.wait(5)
+								if mobileButtons.store.Visible and currentMobileTarget == target then
+									mobileButtons.store.Visible = false
+									currentMobileTarget = nil
+									print("[SACK CLIENT] Auto-hiding store button")
+								end
+							end)
+						else
+							print("[SACK CLIENT] Mobile buttons not found!")
+						end
+					else
+						print("[SACK CLIENT] Item too far away")
+					end
+				end
+			end
+		else
+			print("[SACK CLIENT] No collectable target found in", #allHits, "hits")
+		end
+	end)
+
+	-- Drop button visibility manager
+	task.spawn(function()
+		while true do
+			task.wait(0.1)
+			if mobileButtons and mobileButtons.drop then
+				if sackEquipped and currentCount > 0 then
+					mobileButtons.drop.Visible = true
+				else
+					mobileButtons.drop.Visible = false
+				end
+			end
+		end
+	end)
+end
+
+-- PC Highlighting system
+local function createHighlight(item)
+	if currentHighlight then
+		currentHighlight:Destroy()
+	end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Adornee = item
+	highlight.FillColor = Color3.fromRGB(100, 255, 100)
+	highlight.FillTransparency = 0.7
+	highlight.OutlineColor = Color3.fromRGB(0, 255, 0)
+	highlight.OutlineTransparency = 0
+	highlight.Parent = item
+	currentHighlight = highlight
+end
+
+local function removeHighlight()
+	if currentHighlight then
+		currentHighlight:Destroy()
+		currentHighlight = nil
+	end
+end
+
+-- Get item player is looking at
+local function getTargetItem()
+	local target = mouse.Target
+	if not target then return nil end
+
+	if CollectionService:HasTag(target, "Collectable") then
+		return target
+	end
+
+	if target.Parent and CollectionService:HasTag(target.Parent, "Collectable") then
+		return target.Parent
+	end
+
+	return nil
+end
+
+-- Check if item is in range
+local function isInRange(item, range)
+	local character = player.Character
+	if not character or not character:FindFirstChild("HumanoidRootPart") then
+		return false
+	end
+
+	local itemPos
+	if item:IsA("Model") and item.PrimaryPart then
+		itemPos = item.PrimaryPart.Position
+	elseif item:IsA("BasePart") then
+		itemPos = item.Position
+	else
+		return false
+	end
+
+	local distance = (character.HumanoidRootPart.Position - itemPos).Magnitude
+	return distance <= (range or 15)
+end
+
+-- Server update handler
+updateCountRemote.OnClientEvent:Connect(function(count, capacity)
+	print("[SACK CLIENT] Count updated:", count, "/", capacity)
+	currentCount = count
+	maxCapacity = capacity
+	updateCounter()
+end)
+
+-- PC Keyboard input
+if not isMobile() then
+	UserInputService.InputBegan:Connect(function(input, processed)
+		if processed or not sackEquipped then return end
+
+		if input.KeyCode == Enum.KeyCode.F then
+			local item = getTargetItem()
+			if item and isInRange(item, 15) then
+				collectRemote:FireServer(item)
+			elseif currentCount > 0 then
+				dropRemote:FireServer()
+				dropSound:Play()
+			end
+		end
+	end)
+
+	-- Highlighting loop for PC
+	RunService.Heartbeat:Connect(function()
+		if not sackEquipped or isMobile() then
+			removeHighlight()
+			return
+		end
+
+		local target = getTargetItem()
+		if target and isInRange(target, 15) then
+			if currentHighlight and currentHighlight.Adornee ~= target then
+				removeHighlight()
+				createHighlight(target)
+			elseif not currentHighlight then
+				createHighlight(target)
+			end
+		else
+			removeHighlight()
+		end
+	end)
+end
+
+-- Tool setup
+local function setupTool(tool)
+	if tool.Name ~= "Sack" then return end
+
+	print("[SACK CLIENT] Setting up sack tool")
+	sackTool = tool
+
+	tool.Equipped:Connect(function()
+		print("[SACK CLIENT] Sack equipped!")
+		sackEquipped = true
+
+		if tool:FindFirstChild("Handle") then
+			createCounterGui(tool.Handle)
+			updateCounter()
+		end
+	end)
+
+	tool.Unequipped:Connect(function()
+		print("[SACK CLIENT] Sack unequipped!")
+		sackEquipped = false
+		removeHighlight()
+
+		if countGui then
+			countGui:Destroy()
+			countGui = nil
+		end
+
+		-- Hide mobile buttons
+		if mobileButtons then
+			mobileButtons.store.Visible = false
+			mobileButtons.drop.Visible = false
+		end
+		currentMobileTarget = nil
+	end)
+end
+
+-- Monitor for tools
+local function monitorBackpack()
+	local backpack = player:WaitForChild("Backpack")
+
+	for _, tool in pairs(backpack:GetChildren()) do
+		if tool:IsA("Tool") then
+			setupTool(tool)
+		end
+	end
+
+	backpack.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			setupTool(child)
+		end
+	end)
+end
+
+-- Monitor character
+player.CharacterAdded:Connect(function(character)
+	character.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			setupTool(child)
+		end
+	end)
+end)
+
+if player.Character then
+	for _, child in pairs(player.Character:GetChildren()) do
+		if child:IsA("Tool") then
+			setupTool(child)
+		end
+	end
+
+	player.Character.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			setupTool(child)
+		end
+	end)
+end
+
+-- Initialize everything
+monitorBackpack()
+
+-- Setup mobile touch immediately if on mobile
+if isMobile() then
+	setupMobileTouch()
+end
+
+print("[SACK CLIENT] System Loaded Successfully!")
