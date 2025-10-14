@@ -1,0 +1,194 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
+
+-- Wait for GlobalState module
+local GlobalState = require(ReplicatedStorage:WaitForChild("GlobalState"))
+GlobalState:InitializeRemotes()
+
+-- Get remote events
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+local timeUpdateRemote = remotes:WaitForChild("TimeUpdate")
+local dayNightChangeRemote = remotes:WaitForChild("DayNightChange")
+local gameStateRequestRemote = remotes:WaitForChild("GameStateRequest")
+
+local TimeManager = {
+	lastNightState = false,
+	updateInterval = 0,
+
+	-- Simple Day Lighting
+	dayLighting = {
+		Brightness = 1.2,
+		Ambient = Color3.fromRGB(110, 110, 110),
+		OutdoorAmbient = Color3.fromRGB(140, 140, 130),
+		ColorShift_Top = Color3.fromRGB(255, 250, 240),
+		ColorShift_Bottom = Color3.fromRGB(200, 190, 180),
+		ShadowSoftness = 0.2,
+		ExposureCompensation = 0,
+		ClockTime = 14
+	},
+
+	-- Simple Night Lighting
+	nightLighting = {
+		Brightness = 0.3,
+		Ambient = Color3.fromRGB(20, 20, 30),
+		OutdoorAmbient = Color3.fromRGB(40, 40, 60),
+		ColorShift_Top = Color3.fromRGB(30, 35, 60),
+		ColorShift_Bottom = Color3.fromRGB(10, 10, 20),
+		ShadowSoftness = 0.5,
+		ExposureCompensation = -1,
+		ClockTime = 0
+	},
+
+	-- Simple Day Atmosphere
+	dayAtmosphere = {
+		Color = Color3.fromRGB(200, 200, 200),
+		Decay = Color3.fromRGB(150, 130, 100),
+		Glare = 0.3,
+		Haze = 2
+	},
+
+	-- Simple Night Atmosphere
+	nightAtmosphere = {
+		Color = Color3.fromRGB(80, 80, 100),
+		Decay = Color3.fromRGB(20, 20, 30),
+		Glare = 0,
+		Haze = 3
+	}
+}
+
+-- Initialize lighting and atmosphere
+function TimeManager:InitializeLighting()
+	-- Set initial day lighting
+	for property, value in pairs(self.dayLighting) do
+		Lighting[property] = value
+	end
+
+	-- Create atmosphere if it doesn't exist
+	if not Lighting:FindFirstChild("Atmosphere") then
+		local atmosphere = Instance.new("Atmosphere")
+		atmosphere.Parent = Lighting
+	end
+
+	local atmosphere = Lighting.Atmosphere
+	for property, value in pairs(self.dayAtmosphere) do
+		atmosphere[property] = value
+	end
+
+	-- Simple fog for post-apocalyptic feel
+	Lighting.FogColor = Color3.fromRGB(180, 180, 180)
+	Lighting.FogEnd = 500
+	Lighting.FogStart = 50
+
+	print("[TimeManager] Lighting initialized")
+end
+
+-- Smooth transition between lighting states
+function TimeManager:TransitionLighting(isNight)
+	local targetLighting = isNight and self.nightLighting or self.dayLighting
+	local targetAtmosphere = isNight and self.nightAtmosphere or self.dayAtmosphere
+
+	local tweenInfo = TweenInfo.new(
+		30, -- 30 second transition
+		Enum.EasingStyle.Linear,
+		Enum.EasingDirection.InOut
+	)
+
+	-- Tween lighting properties
+	local lightingTween = TweenService:Create(Lighting, tweenInfo, targetLighting)
+	lightingTween:Play()
+
+	-- Tween atmosphere properties
+	if Lighting:FindFirstChild("Atmosphere") then
+		local atmosphereTween = TweenService:Create(Lighting.Atmosphere, tweenInfo, targetAtmosphere)
+		atmosphereTween:Play()
+	end
+
+	-- Adjust fog for night/day
+	local fogTween = TweenService:Create(Lighting, tweenInfo, {
+		FogColor = isNight and Color3.fromRGB(50, 50, 70) or Color3.fromRGB(180, 180, 180),
+		FogEnd = isNight and 300 or 500,
+		FogStart = isNight and 20 or 50
+	})
+	fogTween:Play()
+
+	-- Set zombie spawn attribute
+	game.ReplicatedStorage:SetAttribute("IsNight", isNight)
+
+	-- Debug output
+	if isNight then
+		print("[TimeManager] Transitioning to night")
+		print("🌙 ZOMBIES: Night mode activated - zombies can now spawn!")
+	else
+		print("[TimeManager] Transitioning to day") 
+		print("☀️ ZOMBIES: Day mode activated - existing zombies will start burning!")
+	end
+end
+
+-- Update game state and send to clients
+function TimeManager:Update()
+	local isNight = GlobalState:IsNight()
+
+	-- Check for day/night change
+	if isNight ~= self.lastNightState then
+		self.lastNightState = isNight
+		GlobalState.isNight = isNight
+		GlobalState.timeOfDay = GlobalState:GetTimeOfDay()
+
+		-- Transition lighting
+		self:TransitionLighting(isNight)
+
+		-- Notify all clients
+		dayNightChangeRemote:FireAllClients({
+			isNight = isNight,
+			day = GlobalState.currentDay,
+			timeOfDay = GlobalState.timeOfDay
+		})
+
+		if not isNight then
+			GlobalState.currentDay = GlobalState.currentDay + 1
+			print("[TimeManager] Day " .. GlobalState.currentDay .. " begins!")
+		end
+	end
+
+	-- Send periodic updates to clients (every 10 seconds)
+	self.updateInterval = self.updateInterval + 1
+	if self.updateInterval >= 10 then
+		self.updateInterval = 0
+
+		local gameState = {
+			isNight = GlobalState.isNight,
+			timeOfDay = GlobalState:GetTimeOfDay(),
+			timeRemaining = math.floor(GlobalState:GetTimeRemaining()),
+			currentDay = GlobalState.currentDay,
+			cycleProgress = GlobalState:GetCycleProgress()
+		}
+
+		timeUpdateRemote:FireAllClients(gameState)
+	end
+end
+
+-- Handle client requests for game state
+gameStateRequestRemote.OnServerEvent:Connect(function(player)
+	local gameState = {
+		isNight = GlobalState.isNight,
+		timeOfDay = GlobalState:GetTimeOfDay(),
+		timeRemaining = math.floor(GlobalState:GetTimeRemaining()),
+		currentDay = GlobalState.currentDay,
+		cycleProgress = GlobalState:GetCycleProgress()
+	}
+
+	timeUpdateRemote:FireClient(player, gameState)
+end)
+
+-- Initialize and start the system
+TimeManager:InitializeLighting()
+
+-- Main update loop (runs every second)
+RunService.Heartbeat:Connect(function()
+	TimeManager:Update()
+end)
+
+print("[TimeManager] System started - Day " .. GlobalState.currentDay)
