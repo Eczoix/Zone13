@@ -89,31 +89,31 @@ These define how the player interacts with the world and form the foundation of 
 
 System	Description
 Interaction System	Allows the player to interact with objects (open doors, search loot, pick up items, read notes, talk to NPCs).
-Inventory System	Manages collected items with item stacking, drag-and-drop, and category sorting (weapons, crafting, medical, etc.).
+Inventory System	Manages collected items with stacking, drag-and-drop, and category sorting (weapons, crafting, medical, etc.).
 Loot System	Spawns random loot inside containers, lockers, and bodies with rarity tiers (Common → Legendary).
 Crafting System	Uses a recipe table or crafting bench to create tools, weapons, and survival items from collected materials.
 Sack/Storage System	Lets players store extra loot in backpacks, lockers, or bases.
 Equipment System	Allows equipping weapons, armor, flashlights, and accessories with visual changes and stat bonuses.
 Flashlight/Battery System	Flashlight consumes battery power that can be replaced using found batteries. Works with lighting and fear mechanics.
-Day/Night Cycle	Dynamically changes lighting, enemy spawns, and atmosphere over time. (Already implemented partially.)
+Day/Night Cycle	Dynamically changes lighting, enemy spawns, and atmosphere over time. (Partially implemented.)
 Sound/Footstep System	Detects footsteps and generates sounds that alert nearby enemies or create ambient immersion.
 💀 2. Player Systems
 
-Everything that defines the player’s survival, health, and abilities.
+Defines the player’s survival, health, and abilities.
 
 System	Description
 Health System	Tracks player HP and handles damage, healing, and death states.
 Hunger System	Decreases over time; affects stamina regeneration and health if ignored.
 Stamina System	Controls sprinting, melee attacks, and dodge actions; recharges slowly or through rest.
-Infection System (Optional)	Exposure to infected areas or attacks increases infection level — adds tension.
+Infection System (Optional)	Exposure to infected areas or attacks increases infection level, adding tension.
 Weapon System	Handles melee and ranged combat, weapon durability, and hit detection.
 Melee Combat System	Swing animations, stamina cost, and hit registration.
 Gun/Ammo System	Firearms, reloading, ammo tracking, recoil, and aim spread.
-Stealth System	Allows crouching, sound detection, and line-of-sight stealth mechanics for sneaking around enemies.
+Stealth System	Allows crouching, sound detection, and line-of-sight stealth mechanics.
 Death/Respawn System	Defines what happens when the player dies — checkpoint, permadeath, or last save.
 🌍 3. World & Environmental Systems
 System	Description
-Procedural Room/Map Generation	Randomly spawns or connects prebuilt areas to create replayable runs (like DOORS). Destroys old areas behind the player.
+Procedural Room/Map Generation	Randomly spawns or connects prebuilt areas to create replayable runs. Destroys old areas behind the player.
 Lighting System	Controls environment lighting transitions (natural light, emergency lights, flickers). Works with power systems and ambience.
 Weather System	Randomized rain, fog, or storm events that affect lighting and sound.
 Environmental Interaction System	Includes destructible objects, power switches, locked doors, and hacking terminals.
@@ -124,18 +124,18 @@ Base/Outpost System	Player can build or claim safe zones to rest, craft, or save
 System	Description
 Zombie/Infected AI	Pathfinding, vision, hearing, and chase mechanics. Different variants (slow, fast, mutated).
 Human Enemy AI (Gangs/Scavs)	Uses cover, shoots, throws grenades, and retreats when injured.
-Robot AI (Lazarus Units)	Advanced detection, patrols, and laser or projectile attacks.
-Boss AI System	Handles large-scale scripted encounters (e.g., the Core fight). Includes phases, animations, and weak points.
-Faction System	Distinguishes between different AI groups (infected, scavengers, robots) with unique behaviors and alliances.
+Robot AI (Lazarus Units)	Advanced detection, patrols, and laser/projectile attacks.
+Boss AI System	Handles large-scale scripted encounters. Includes phases, animations, and weak points.
+Faction System	Distinguishes between AI groups (infected, scavengers, robots) with unique behaviors and alliances.
 🧠 5. NPC & Quest Systems
 System	Description
-Dialogue System	Interactive dialogue with voice/text choices, supports branching dialogue for story progression.
-Quest/Mission System	Manages objectives, progression tracking, and reward delivery. Includes main story and side missions.
-Companion System (Optional)	Allows temporary NPC allies who assist in combat or story sequences.
+Dialogue System	Interactive dialogue with voice/text choices, supports branching story progression.
+Quest/Mission System	Manages objectives, progression tracking, and reward delivery (main story and side missions).
+Companion System (Optional)	Temporary NPC allies assisting in combat or story sequences.
 🧾 6. UI / HUD Systems
 System	Description
 Main HUD	Displays health, hunger, stamina, equipped items, and flashlight battery.
-Inventory UI	Grid or list-style inventory interface with tooltips and rarity highlights.
+Inventory UI	Grid or list-style interface with tooltips and rarity highlights.
 Loot Window	Pop-up interface for containers and corpses.
 Crafting UI	Shows craftable recipes and item requirements.
 Quest Log / Objective Tracker	Displays mission progress and goals.
@@ -144,14 +144,14 @@ Settings Menu	Graphics, sound, and keybind customization.
 📈 7. Progression Systems
 System	Description
 Experience/Leveling System	Player gains XP from kills, exploration, and quests to improve stats.
-Skill System (Optional)	Unlockable perks — e.g., faster crafting, better loot detection, quieter movement.
-Reputation/Faction System	Actions affect relations with NPC factions (gangs, survivors, scientists).
+Skill System (Optional)	Unlockable perks (e.g., faster crafting, better loot detection, quieter movement).
+Reputation/Faction System	Player actions affect relations with NPC factions.
 Data Save System	Saves player progress, inventory, and story checkpoints locally or via DataStore.
 🧰 8. Optimization & Technical Systems
 System	Description
-Despawn System	Removes rooms or enemies behind the player to improve performance (you’ve already mentioned this).
+Despawn System	Removes rooms or enemies behind the player to improve performance.
 Streaming/Loading System	Loads only nearby chunks of the map to save memory.
-Global State System	Keeps all systems synchronized across client/server (you already have a GlobalState module).
+Global State System	Keeps all systems synchronized across client/server.
 Sound Zones System	Different ambience and sound effects depending on area.
 Auto-Save/Checkpoint System	Saves data on quit or at key story moments.
-Lighting Optimization	Uses smooth transitions, light toggling, and LOD (Level of Detail) for efficiency.
+Lighting Optimization	Smooth transitions, light toggling, and LOD (Level of Detail) for efficiency.
