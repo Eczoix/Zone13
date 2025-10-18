@@ -1,7 +1,7 @@
 Last Light: Zone 13 — Official Lore Document
 Setting
 
-The year is 2046.
+The year is 2030.
 Following a catastrophic viral outbreak, an entire city was sealed off by the government and marked as Zone 13 — a permanent quarantine area. The outer walls stand high and cold, separating the infected and the lost from the rest of humanity.
 
 Inside Zone 13 lies the Lazarus Sector, once home to cutting-edge research and military projects. Now it’s nothing more than a decaying labyrinth of slums, ruined streets, and half-buried secrets.
