@@ -1,0 +1,478 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Lighting = game:GetService("Lighting")
+local SoundService = game:GetService("SoundService")
+local Workspace = game:GetService("Workspace")
+
+local player = Players.LocalPlayer
+local camera = Workspace.CurrentCamera
+
+-- Wait for remote events
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+local weatherChangeRemote = remotes:WaitForChild("WeatherChange")
+local gameStateRequestRemote = remotes:WaitForChild("GameStateRequest")
+
+local WeatherClient = {
+	currentWeather = "Clear",
+	rainEffect = nil,
+	fogEffect = nil,
+	ambientSound = nil,
+	lightningActive = false,
+	originalLighting = {}
+}
+
+-- Reference to your custom weather models in ReplicatedStorage/Weather folder
+local weatherFolder = ReplicatedStorage:WaitForChild("Weather")
+local rainTemplate = weatherFolder:WaitForChild("Rain")
+local fogTemplate = weatherFolder:WaitForChild("Fog")
+
+-- Store original lighting values (not actually used, can remove if not needed later)
+function WeatherClient:StoreOriginalLighting()
+	self.originalLighting = {
+		Brightness = Lighting.Brightness,
+		Ambient = Lighting.Ambient,
+		OutdoorAmbient = Lighting.OutdoorAmbient
+	}
+end
+
+-- Weather effects configuration (NO FOG SETTINGS - your custom atmosphere handles it)
+local weatherEffects = {
+	Clear = {
+		-- Lighting
+		brightness = 2,
+		ambient = Color3.fromRGB(140, 140, 140),
+		outdoorAmbient = Color3.fromRGB(180, 180, 180),
+		colorShiftTop = Color3.fromRGB(255, 255, 255),
+		colorShiftBottom = Color3.fromRGB(200, 200, 200),
+
+		-- Sound
+		soundId = nil
+	},
+	Rain = {
+		-- Lighting (darker)
+		brightness = 1,
+		ambient = Color3.fromRGB(80, 90, 100),
+		outdoorAmbient = Color3.fromRGB(100, 110, 120),
+		colorShiftTop = Color3.fromRGB(150, 160, 180),
+		colorShiftBottom = Color3.fromRGB(100, 110, 130),
+
+		-- Sound (YOUR CUSTOM RAIN SOUND)
+		soundId = "rbxassetid://1516791621"
+	},
+	Fog = {
+		-- Lighting only (your Atmosphere object handles fog visuals)
+		brightness = 0.8,
+		ambient = Color3.fromRGB(120, 120, 125),
+		outdoorAmbient = Color3.fromRGB(130, 135, 140),
+		colorShiftTop = Color3.fromRGB(160, 160, 165),
+		colorShiftBottom = Color3.fromRGB(130, 130, 135),
+
+		-- Sound (silent)
+		soundId = nil
+	},
+	Storm = {
+		-- Lighting (very dark)
+		brightness = 0.5,
+		ambient = Color3.fromRGB(40, 45, 60),
+		outdoorAmbient = Color3.fromRGB(60, 65, 80),
+		colorShiftTop = Color3.fromRGB(80, 85, 110),
+		colorShiftBottom = Color3.fromRGB(40, 45, 60),
+
+		-- Sound (YOUR CUSTOM RAIN SOUND for heavy storm)
+		soundId = "rbxassetid://1516791621"
+	}
+}
+
+-- Show your custom rain (clone from ReplicatedStorage to Workspace)
+function WeatherClient:ShowRain(isStorm)
+	if not rainTemplate then
+		warn("[WeatherClient] Rain template not found in ReplicatedStorage!")
+		return
+	end
+
+	-- Clone your rain model to Workspace (keeps exact position from Studio)
+	local rainClone = rainTemplate:Clone()
+	rainClone.Parent = Workspace
+
+	-- Enable all particle emitters and adjust for storm
+	for _, descendant in pairs(rainClone:GetDescendants()) do
+		if descendant:IsA("ParticleEmitter") then
+			-- Store original rate if not already stored
+			if not descendant:GetAttribute("OriginalRate") then
+				descendant:SetAttribute("OriginalRate", descendant.Rate)
+			end
+
+			-- Reset to original rate first
+			descendant.Rate = descendant:GetAttribute("OriginalRate")
+
+			-- If it's a storm, increase particle emission rates
+			if isStorm then
+				descendant.Rate = descendant.Rate * 2  -- Double the rain intensity
+			end
+
+			descendant.Enabled = true
+		end
+	end
+
+	self.rainEffect = rainClone
+	print("[WeatherClient] ✅ Rain particles ENABLED at original position" .. (isStorm and " (STORM MODE - 2x intensity)" or ""))
+end
+
+-- Hide rain particles (destroy the clone)
+function WeatherClient:HideRain()
+	if self.rainEffect then
+		self.rainEffect:Destroy()
+		self.rainEffect = nil
+		print("[WeatherClient] ❌ Rain particles DISABLED")
+	end
+end
+
+-- Show your custom fog (clone atmosphere from ReplicatedStorage to Lighting)
+function WeatherClient:ShowFog()
+	if not fogTemplate then
+		warn("[WeatherClient] Fog template not found in ReplicatedStorage!")
+		return
+	end
+
+	-- Clone your fog atmosphere to Lighting
+	local fogClone = fogTemplate:Clone()
+	fogClone.Name = "CustomFog"
+	fogClone.Parent = Lighting
+
+	self.fogEffect = fogClone
+	print("[WeatherClient] ✅ Custom Fog atmosphere ENABLED")
+end
+
+-- Hide fog atmosphere (destroy the clone)
+function WeatherClient:HideFog()
+	if self.fogEffect then
+		self.fogEffect:Destroy()
+		self.fogEffect = nil
+		print("[WeatherClient] ❌ Custom Fog atmosphere DISABLED")
+	end
+
+	-- Also check if there's a CustomFog in Lighting and remove it
+	local existingFog = Lighting:FindFirstChild("CustomFog")
+	if existingFog then
+		existingFog:Destroy()
+	end
+end
+
+-- Create or update ambient sound
+function WeatherClient:SetAmbientSound(soundId)
+	if self.ambientSound then
+		self.ambientSound:Stop()
+		self.ambientSound:Destroy()
+		self.ambientSound = nil
+	end
+
+	if soundId then
+		local sound = Instance.new("Sound")
+		sound.Name = "WeatherAmbient"
+		sound.SoundId = soundId
+		sound.Volume = 0.5  -- Increased volume for your custom rain sound
+		sound.Looped = true
+		sound.Parent = SoundService
+
+		sound:Play()
+		self.ambientSound = sound
+		print("[WeatherClient] 🔊 Ambient sound started: " .. soundId)
+	end
+end
+
+-- Lightning flash effect (PROFESSIONAL & REALISTIC)
+function WeatherClient:CreateLightningFlash()
+	if not self.lightningActive then
+		return
+	end
+
+	-- Random lightning type
+	local lightningTypes = {"distant", "close", "very_close"}
+	local lightningType = lightningTypes[math.random(1, #lightningTypes)]
+
+	-- Get screen GUI
+	local screenGui = player.PlayerGui:FindFirstChild("ScreenGui")
+	if not screenGui then
+		screenGui = Instance.new("ScreenGui")
+		screenGui.Name = "ScreenGui"
+		screenGui.Parent = player.PlayerGui
+	end
+
+	-- Store original lighting values
+	local originalBrightness = Lighting.Brightness
+	local originalAmbient = Lighting.Ambient
+	local originalOutdoorAmbient = Lighting.OutdoorAmbient
+
+	if lightningType == "very_close" then
+		-- VERY CLOSE LIGHTNING - Intense, blinding
+		print("[WeatherClient] ⚡⚡⚡ VERY CLOSE LIGHTNING!")
+
+		-- Create intense white-blue flash
+		local flashFrame = Instance.new("Frame")
+		flashFrame.Name = "LightningFlash"
+		flashFrame.Size = UDim2.new(1, 0, 1, 0)
+		flashFrame.BackgroundColor3 = Color3.fromRGB(220, 235, 255)
+		flashFrame.BackgroundTransparency = 0
+		flashFrame.BorderSizePixel = 0
+		flashFrame.ZIndex = 1000
+		flashFrame.Parent = screenGui
+
+		-- EXTREME brightness spike
+		Lighting.Brightness = 8
+		Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+		Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+
+		-- Quick multi-flash effect (realistic lightning flicker)
+		task.wait(0.03)
+		flashFrame.BackgroundTransparency = 1
+		Lighting.Brightness = originalBrightness
+
+		task.wait(0.02)
+		flashFrame.BackgroundTransparency = 0
+		Lighting.Brightness = 10
+
+		task.wait(0.04)
+		flashFrame.BackgroundTransparency = 0.5
+		Lighting.Brightness = 6
+
+		task.wait(0.03)
+
+		-- Fade out
+		Lighting.Brightness = originalBrightness
+		Lighting.Ambient = originalAmbient
+		Lighting.OutdoorAmbient = originalOutdoorAmbient
+
+		local flashTween = TweenService:Create(
+			flashFrame,
+			TweenInfo.new(0.4, Enum.EasingStyle.Exponential),
+			{BackgroundTransparency = 1}
+		)
+		flashTween:Play()
+
+		flashTween.Completed:Connect(function()
+			flashFrame:Destroy()
+		end)
+
+		-- IMMEDIATE loud thunder (no delay for close strike)
+		local thunder = Instance.new("Sound")
+		thunder.SoundId = "rbxassetid://111768657135706"
+		thunder.Volume = 1.0  -- LOUD
+		thunder.Parent = SoundService
+		thunder:Play()
+
+		thunder.Ended:Connect(function()
+			thunder:Destroy()
+		end)
+
+	elseif lightningType == "close" then
+		-- CLOSE LIGHTNING - Strong flash
+		print("[WeatherClient] ⚡⚡ CLOSE LIGHTNING!")
+
+		-- Create blue-white flash
+		local flashFrame = Instance.new("Frame")
+		flashFrame.Name = "LightningFlash"
+		flashFrame.Size = UDim2.new(1, 0, 1, 0)
+		flashFrame.BackgroundColor3 = Color3.fromRGB(200, 220, 255)
+		flashFrame.BackgroundTransparency = 0.2
+		flashFrame.BorderSizePixel = 0
+		flashFrame.ZIndex = 1000
+		flashFrame.Parent = screenGui
+
+		-- Strong brightness spike
+		Lighting.Brightness = 5
+		Lighting.Ambient = Color3.fromRGB(200, 220, 255)
+		Lighting.OutdoorAmbient = Color3.fromRGB(220, 230, 255)
+
+		-- Single flash
+		task.wait(0.06)
+
+		Lighting.Brightness = originalBrightness
+		Lighting.Ambient = originalAmbient
+		Lighting.OutdoorAmbient = originalOutdoorAmbient
+
+		local flashTween = TweenService:Create(
+			flashFrame,
+			TweenInfo.new(0.5, Enum.EasingStyle.Exponential),
+			{BackgroundTransparency = 1}
+		)
+		flashTween:Play()
+
+		flashTween.Completed:Connect(function()
+			flashFrame:Destroy()
+		end)
+
+		-- Thunder with short delay
+		task.spawn(function()
+			task.wait(math.random(3, 6) / 10)  -- 0.3-0.6 second delay
+
+			local thunder = Instance.new("Sound")
+			thunder.SoundId = "rbxassetid://111768657135706"
+			thunder.Volume = 0.8
+			thunder.Parent = SoundService
+			thunder:Play()
+
+			thunder.Ended:Connect(function()
+				thunder:Destroy()
+			end)
+		end)
+
+	else
+		-- DISTANT LIGHTNING - Subtle flash in clouds
+		print("[WeatherClient] ⚡ Distant lightning...")
+
+		-- Create subtle ambient flash (no full screen)
+		local flashFrame = Instance.new("Frame")
+		flashFrame.Name = "LightningFlash"
+		flashFrame.Size = UDim2.new(1, 0, 1, 0)
+		flashFrame.BackgroundColor3 = Color3.fromRGB(180, 200, 230)
+		flashFrame.BackgroundTransparency = 0.7
+		flashFrame.BorderSizePixel = 0
+		flashFrame.ZIndex = 1000
+		flashFrame.Parent = screenGui
+
+		-- Gentle brightness increase
+		Lighting.Brightness = originalBrightness * 2
+		Lighting.Ambient = Color3.fromRGB(100, 120, 150)
+
+		task.wait(0.08)
+
+		Lighting.Brightness = originalBrightness
+		Lighting.Ambient = originalAmbient
+
+		local flashTween = TweenService:Create(
+			flashFrame,
+			TweenInfo.new(0.6, Enum.EasingStyle.Exponential),
+			{BackgroundTransparency = 1}
+		)
+		flashTween:Play()
+
+		flashTween.Completed:Connect(function()
+			flashFrame:Destroy()
+		end)
+
+		-- Thunder with long delay
+		task.spawn(function()
+			task.wait(math.random(15, 30) / 10)  -- 1.5-3 second delay
+
+			local thunder = Instance.new("Sound")
+			thunder.SoundId = "rbxassetid://111768657135706"
+			thunder.Volume = 0.4  -- Quiet distant rumble
+			thunder.Parent = SoundService
+			thunder:Play()
+
+			thunder.Ended:Connect(function()
+				thunder:Destroy()
+			end)
+		end)
+	end
+end
+
+-- Start lightning loop (IMPROVED with varying intervals)
+function WeatherClient:StartLightningLoop()
+	self.lightningActive = true
+
+	task.spawn(function()
+		while self.lightningActive do
+			-- Realistic random intervals (storms have unpredictable lightning)
+			local minDelay = 3
+			local maxDelay = 15
+			local delay = math.random(minDelay, maxDelay)
+
+			task.wait(delay)
+
+			if self.lightningActive then
+				self:CreateLightningFlash()
+
+				-- Occasionally have double/triple strikes (realistic storm behavior)
+				if math.random(1, 100) <= 25 then  -- 25% chance
+					task.wait(math.random(5, 15) / 10)
+					self:CreateLightningFlash()
+
+					if math.random(1, 100) <= 15 then  -- 15% chance for triple
+						task.wait(math.random(3, 8) / 10)
+						self:CreateLightningFlash()
+					end
+				end
+			end
+		end
+	end)
+
+	print("[WeatherClient] ⚡ Professional lightning system activated")
+end
+
+-- Stop lightning loop
+function WeatherClient:StopLightningLoop()
+	self.lightningActive = false
+	print("[WeatherClient] Lightning system deactivated")
+end
+
+-- Apply weather effects (SIMPLIFIED - no fog/atmosphere tweening)
+function WeatherClient:ApplyWeather(weatherType)
+	local effects = weatherEffects[weatherType]
+	if not effects then
+		warn("[WeatherClient] Unknown weather type: " .. tostring(weatherType))
+		return
+	end
+
+	print("[WeatherClient] 🌤️ Applying weather: " .. weatherType)
+
+	local tweenInfo = TweenInfo.new(3, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+
+	-- Apply LIGHTING changes only
+	local lightingTween = TweenService:Create(Lighting, tweenInfo, {
+		Brightness = effects.brightness,
+		Ambient = effects.ambient,
+		OutdoorAmbient = effects.outdoorAmbient,
+		ColorShift_Top = effects.colorShiftTop,
+		ColorShift_Bottom = effects.colorShiftBottom
+	})
+	lightingTween:Play()
+
+	-- Handle RAIN particles (using YOUR custom setup)
+	self:HideRain()
+	if weatherType == "Rain" then
+		self:ShowRain(false)
+	elseif weatherType == "Storm" then
+		self:ShowRain(true)
+	end
+
+	-- Handle FOG atmosphere (using YOUR custom Atmosphere object)
+	self:HideFog()
+	if weatherType == "Fog" then
+		self:ShowFog()
+	end
+
+	-- Handle AMBIENT sounds
+	self:SetAmbientSound(effects.soundId)
+
+	-- Handle LIGHTNING for storms
+	self:StopLightningLoop()
+	if weatherType == "Storm" then
+		self:StartLightningLoop()
+	end
+
+	self.currentWeather = weatherType
+
+	print("[WeatherClient] ✅ Weather effects applied successfully!")
+end
+
+-- Handle weather change event
+weatherChangeRemote.OnClientEvent:Connect(function(data)
+	if data and data.weather then
+		print("[WeatherClient] 📡 Received weather change: " .. data.weather)
+		WeatherClient:ApplyWeather(data.weather)
+	end
+end)
+
+-- Initialize
+task.wait(1)
+WeatherClient:StoreOriginalLighting()
+
+-- Make sure rain and fog start disabled
+WeatherClient:HideRain()
+WeatherClient:HideFog()
+
+gameStateRequestRemote:FireServer()
+
+print("[WeatherClient] 🌦️ Weather system initialized and ready!")
