@@ -1,0 +1,95 @@
+-- 📢 NOTIFICATION SERVER
+-- Sends notifications to players for game events
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+-- Wait for remotes
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+
+-- Create notification remote
+local notificationRemote = remotes:FindFirstChild("ShowNotification")
+if not notificationRemote then
+	notificationRemote = Instance.new("RemoteEvent")
+	notificationRemote.Name = "ShowNotification"
+	notificationRemote.Parent = remotes
+	print("✅ Created ShowNotification remote")
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       NOTIFICATION PRESETS
+-- ═══════════════════════════════════════════════════════════════
+
+local NotificationPresets = {
+
+	DayStart = function(day, maxZombies)
+		return {
+			icon = "☀️",
+			title = "DAY " .. day,
+			message = "Maximum zombie threat: " .. maxZombies,
+			duration = 4,
+			color1 = Color3.fromRGB(255, 215, 0),
+			color2 = Color3.fromRGB(255, 150, 0),
+			strokeColor = Color3.fromRGB(255, 215, 0),
+			titleColor = Color3.fromRGB(255, 255, 255),
+			messageColor = Color3.fromRGB(220, 220, 220)
+		}
+	end,
+
+	DaySurvived = function(day)
+		return {
+			icon = "✅",
+			title = "DAY " .. day .. " SURVIVED",
+			message = "You lived to see another dawn.",
+			duration = 3,
+			color1 = Color3.fromRGB(46, 204, 113),
+			color2 = Color3.fromRGB(30, 150, 80),
+			strokeColor = Color3.fromRGB(46, 204, 113),
+			titleColor = Color3.fromRGB(255, 255, 255),
+			messageColor = Color3.fromRGB(220, 255, 220)
+		}
+	end,
+
+	NightFalls = function()
+		return {
+			icon = "🌙",
+			title = "NIGHT FALLS",
+			message = "Spawn rate increased 50%",
+			duration = 4,
+			color1 = Color3.fromRGB(138, 177, 255),
+			color2 = Color3.fromRGB(60, 80, 150),
+			strokeColor = Color3.fromRGB(138, 177, 255),
+			titleColor = Color3.fromRGB(255, 255, 255),
+			messageColor = Color3.fromRGB(220, 220, 255)
+		}
+	end,
+
+	DawnBreaks = function()
+		return {
+			icon = "🌅",
+			title = "DAWN BREAKS",
+			message = "The undead retreat from sunlight.",
+			duration = 3,
+			color1 = Color3.fromRGB(255, 182, 91),
+			color2 = Color3.fromRGB(255, 120, 50),
+			strokeColor = Color3.fromRGB(255, 182, 91),
+			titleColor = Color3.fromRGB(255, 255, 255),
+			messageColor = Color3.fromRGB(255, 240, 220)
+		}
+	end
+}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       PUBLIC FUNCTIONS
+-- ═══════════════════════════════════════════════════════════════
+
+function SendNotificationToAll(preset, ...)
+	local data = NotificationPresets[preset](...)
+	if data then
+		notificationRemote:FireAllClients(data)
+		print("📢 Sent notification: " .. preset)
+	end
+end
+
+_G.SendNotificationToAll = SendNotificationToAll
+
+print("✅ Notification Server initialized!")
