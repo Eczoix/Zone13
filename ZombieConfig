@@ -1,0 +1,239 @@
+-- 🧟 ZOMBIE CONFIGURATION
+-- All zombie types, stats, and spawning settings
+-- Optimized for mobile performance
+-- NOW WITH ANIMATION SUPPORT!
+
+local ZombieConfig = {}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       SPAWNING SETTINGS
+-- ═══════════════════════════════════════════════════════════════
+
+ZombieConfig.Spawning = {
+
+	-- DAY SCALING (integrates with GlobalState.currentDay)
+	BaseZombiesDay1 = 10,           -- Starting zombie count on Day 1
+	ZombiesPerDay = 10,             -- Increase per day (Day 2: 30, Day 3: 40, etc.)
+	MaxZombiesTotal = 100,          -- Hard cap for performance
+
+	-- DAY/NIGHT MULTIPLIERS
+	DaySpawnRate = 1.0,             -- 100% spawn rate during day
+	NightSpawnRate = 1.5,           -- 150% spawn rate during night (more zombies!)
+
+	-- SPAWN DISTANCE (around players)
+	MinSpawnDistance = 50,          -- Don't spawn closer than this
+	MaxSpawnDistance = 150,         -- Don't spawn farther than this
+	DespawnDistance = 200,          -- Despawn zombies beyond this distance
+
+	-- SPAWN TIMING
+	SpawnInterval = 3,              -- Check for spawns every 3 seconds
+	SpawnBatchSize = 3,             -- Spawn up to 3 zombies per interval
+
+	-- PERFORMANCE (Mobile Optimization)
+	UpdateDistanceNear = 100,       -- Update AI every frame within 100 studs
+	UpdateDistanceFar = 150,        -- Update AI every 2 seconds beyond 100 studs
+	UpdateDistanceVeryFar = 200,    -- Update AI every 5 seconds beyond 150 studs
+
+	-- SAFE ZONES (zombies can't enter these)
+	SafeZoneTag = "SafeZone",       -- Tag for safe zone parts
+	SafeZoneDamage = 10,            -- Damage per second to zombies in safe zones
+}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       ZOMBIE TYPES
+-- ═══════════════════════════════════════════════════════════════
+
+ZombieConfig.ZombieTypes = {
+
+	-- BASIC WALKER (Most common, day/night)
+	Walker = {
+		Name = "Walker",
+		Health = 100,
+		Damage = 10,
+		WalkSpeed = 8,              -- Slow shambling when roaming
+		AttackRange = 5,            -- Close range (reduced from 8)
+		AttackCooldown = 2,
+		SpawnWeight = 60,           -- 60% spawn chance
+		CanSpawnDay = true,
+		CanSpawnNight = true,
+		XPReward = 10,
+
+		-- AI Behavior
+		DetectionRange = 30,        -- How far they can "see" players
+		ChaseSpeed = 14,            -- Speed when chasing (faster than roaming)
+
+		-- Appearance (for multiple models)
+		ModelFolder = "Walkers",    -- Folder name in ReplicatedStorage
+
+		-- Animations (Your custom animations!)
+		Animations = {
+			Idle = "rbxassetid://71353203245322",      -- Standing/breathing animation
+			RoamWalk = "rbxassetid://120153429239112",  -- Slow shambling walk
+			Chase = "rbxassetid://120153429239112",     -- Fast aggressive run
+			Attack = "rbxassetid://95682571271787",    -- Attack/swipe animation
+		},
+	},
+
+	-- RUNNER (Fast, low health, day/night)
+	Runner = {
+		Name = "Runner",
+		Health = 60,
+		Damage = 8,
+		WalkSpeed = 14,             -- Quick jog when roaming
+		AttackRange = 4,            -- Close range (reduced from 5)
+		AttackCooldown = 1.5,
+		SpawnWeight = 20,           -- 20% spawn chance
+		CanSpawnDay = true,
+		CanSpawnNight = true,
+		XPReward = 15,
+
+		DetectionRange = 80,
+		ChaseSpeed = 22,            -- Very fast when chasing
+
+		ModelFolder = "Runners",
+
+		-- Animations (Replace with your custom animation IDs)
+		Animations = {
+			Idle = "rbxassetid://507766388",      -- Alert stance
+			RoamWalk = "rbxassetid://507777826",  -- Quick jog
+			Chase = "rbxassetid://507767714",     -- Full sprint
+			Attack = "rbxassetid://507768133",    -- Fast slashing
+		},
+	},
+
+	-- BRUTE (Slow tank, day/night)
+	Brute = {
+		Name = "Brute",
+		Health = 250,
+		Damage = 25,
+		WalkSpeed = 6,              -- Very slow, heavy walking
+		AttackRange = 5,            -- Close range (reduced from 6)
+		AttackCooldown = 3,
+		SpawnWeight = 15,           -- 15% spawn chance
+		CanSpawnDay = true,
+		CanSpawnNight = true,
+		XPReward = 30,
+
+		DetectionRange = 50,
+		ChaseSpeed = 10,            -- Still slow when chasing (tank)
+
+		ModelFolder = "Brutes",
+
+		-- Animations (Replace with your custom animation IDs)
+		Animations = {
+			Idle = "rbxassetid://507766388",      -- Heavy breathing
+			RoamWalk = "rbxassetid://507777826",  -- Slow heavy walk
+			Chase = "rbxassetid://507767714",     -- Aggressive charge
+			Attack = "rbxassetid://507768133",    -- Powerful slam
+		},
+	},
+
+	-- VOLATILE (NIGHT ONLY - Your special zombie!)
+	Volatile = {
+		Name = "Volatile",
+		Health = 150,
+		Damage = 30,
+		WalkSpeed = 12,             -- Predatory stalking speed
+		AttackRange = 6,            -- Slightly longer range (reduced from 7)
+		AttackCooldown = 1.8,
+		SpawnWeight = 5,            -- 5% spawn chance (rare!)
+		CanSpawnDay = false,        -- NIGHT ONLY
+		CanSpawnNight = true,
+		XPReward = 50,
+
+		-- Special volatile behavior
+		DetectionRange = 100,       -- Sees very far
+		ChaseSpeed = 28,            -- VERY fast when chasing
+		HasDetectionMechanic = true, -- Uses line-of-sight detection
+		DetectionTime = 3,          -- 3 seconds to fully detect player
+		GlowingEyes = true,         -- Visual indicator
+
+		ModelFolder = "Volatiles",
+
+		-- Animations (Replace with your custom animation IDs)
+		Animations = {
+			Idle = "rbxassetid://507766388",      -- Twitchy/predatory stance
+			RoamWalk = "rbxassetid://507777826",  -- Stalking walk
+			Chase = "rbxassetid://507767714",     -- Extreme sprint
+			Attack = "rbxassetid://507768133",    -- Brutal lunge
+		},
+	},
+}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       HELPER FUNCTIONS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Calculate max zombies for current day
+function ZombieConfig:GetMaxZombiesForDay(day)
+	local maxZombies = self.Spawning.BaseZombiesDay1 + ((day - 1) * self.Spawning.ZombiesPerDay)
+	return math.min(maxZombies, self.Spawning.MaxZombiesTotal)
+end
+
+-- Get current spawn rate based on day/night
+function ZombieConfig:GetSpawnRate(isNight)
+	if isNight then
+		return self.Spawning.NightSpawnRate
+	else
+		return self.Spawning.DaySpawnRate
+	end
+end
+
+-- Get weighted random zombie type (considers spawn weights and time of day)
+function ZombieConfig:GetRandomZombieType(isNight)
+	local validTypes = {}
+	local totalWeight = 0
+
+	-- Filter by time of day
+	for typeName, data in pairs(self.ZombieTypes) do
+		local canSpawn = isNight and data.CanSpawnNight or data.CanSpawnDay
+
+		if canSpawn then
+			table.insert(validTypes, {name = typeName, weight = data.SpawnWeight, data = data})
+			totalWeight = totalWeight + data.SpawnWeight
+		end
+	end
+
+	-- Weighted random selection
+	local rand = math.random() * totalWeight
+	local cumulative = 0
+
+	for _, typeData in ipairs(validTypes) do
+		cumulative = cumulative + typeData.weight
+		if rand <= cumulative then
+			return typeData.name, typeData.data
+		end
+	end
+
+	-- Fallback to Walker
+	return "Walker", self.ZombieTypes.Walker
+end
+
+-- Get zombie stats by type name
+function ZombieConfig:GetZombieStats(typeName)
+	return self.ZombieTypes[typeName]
+end
+
+-- Check if position is in a safe zone
+function ZombieConfig:IsInSafeZone(position)
+	local CollectionService = game:GetService("CollectionService")
+	local safeZones = CollectionService:GetTagged(self.Spawning.SafeZoneTag)
+
+	for _, zone in ipairs(safeZones) do
+		if zone:IsA("BasePart") then
+			local relativePos = zone.CFrame:PointToObjectSpace(position)
+			local halfSize = zone.Size / 2
+
+			-- Check if position is inside the part's bounds
+			if math.abs(relativePos.X) <= halfSize.X and
+				math.abs(relativePos.Y) <= halfSize.Y and
+				math.abs(relativePos.Z) <= halfSize.Z then
+				return true, zone
+			end
+		end
+	end
+
+	return false, nil
+end
+
+return ZombieConfig
