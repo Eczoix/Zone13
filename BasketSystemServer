@@ -1,5 +1,5 @@
 -- ==========================================
--- GLOBAL BASKET STORAGE SYSTEM - SERVER
+-- GLOBAL BASKET STORAGE SYSTEM - SERVER (FIXED)
 -- Place in ServerScriptService
 -- Name: BasketSystemServer
 -- ==========================================
@@ -18,57 +18,52 @@ print("[BASKET SYSTEM] Initializing Server...")
 
 local Config = {
 	-- Visual stacking settings
-	MAX_VISUAL_ITEMS = 20,           -- Max items shown in visual stack
-	STACK_HEIGHT_OFFSET = 0.5,       -- Studs between each stacked item
-	STACK_POSITION_OFFSET = Vector3.new(0, 1, 0), -- Offset from basket bottom
+	MAX_VISUAL_ITEMS = 20,
+	STACK_HEIGHT_OFFSET = 0.5,
+	STACK_POSITION_OFFSET = Vector3.new(0, 1, 0),
 
 	-- Touch detection settings
-	DROPZONE_TAG = "BasketDropZone", -- Tag for drop zones
-	COLLECTABLE_TAG = "Collectable", -- Tag for valid items
-	DEBOUNCE_TIME = 0.1,             -- Prevent spam collection
+	DROPZONE_TAG = "BasketDropZone",
+	COLLECTABLE_TAG = "Collectable",
+	DEBOUNCE_TIME = 0.1,
 
 	-- Storage settings
 	STORAGE_FOLDER_NAME = "GlobalBasketStorage",
 	REMOTES_FOLDER_NAME = "BasketRemotes",
 
 	-- Item validation (optional whitelist - leave empty to allow all)
-	VALID_ITEMS = {
-		-- Examples - add your item names here if you want whitelist
-		-- "WoodenPlank", "Scrap", "Cloth", "Batteries", "Bottle", "Gas"
-	},
+	VALID_ITEMS = {},
 
 	-- Performance settings
-	AUTO_CLEANUP_INTERVAL = 60,      -- Seconds between cleanup checks
-	MAX_SAME_ITEM_STORED = 999,      -- Max stack size per item type
+	AUTO_CLEANUP_INTERVAL = 60,
+	MAX_SAME_ITEM_STORED = 999,
 
 	-- Debug settings
-	DEBUG_MODE = true,               -- Print detailed logs
+	DEBUG_MODE = true,
 }
 
 -- ==========================================
 -- GLOBAL VARIABLES
 -- ==========================================
 
-local GlobalInventory = {}  -- {["WoodenPlank"] = 15, ["Scrap"] = 8, ...}
-local touchDebounce = {}    -- Prevents duplicate collection
+local GlobalInventory = {}
+local touchDebounce = {}
 local storageFolder = nil
 local remotesFolder = nil
 local updateRemote = nil
+local craftingInventoryEvent = nil  -- NEW: For crafting system
 
 -- ==========================================
 -- UTILITY FUNCTIONS
 -- ==========================================
 
--- Debug print function
 local function debugPrint(...)
 	if Config.DEBUG_MODE then
 		print("[BASKET SYSTEM]", ...)
 	end
 end
 
--- Setup storage folders
 local function setupStorage()
-	-- Create storage folder in ServerStorage
 	storageFolder = ServerStorage:FindFirstChild(Config.STORAGE_FOLDER_NAME)
 	if not storageFolder then
 		storageFolder = Instance.new("Folder")
@@ -77,7 +72,6 @@ local function setupStorage()
 		debugPrint("Created storage folder")
 	end
 
-	-- Create remotes folder in ReplicatedStorage
 	remotesFolder = ReplicatedStorage:FindFirstChild(Config.REMOTES_FOLDER_NAME)
 	if not remotesFolder then
 		remotesFolder = Instance.new("Folder")
@@ -86,7 +80,6 @@ local function setupStorage()
 		debugPrint("Created remotes folder")
 	end
 
-	-- Create update remote
 	updateRemote = remotesFolder:FindFirstChild("UpdateBasketDisplay")
 	if not updateRemote then
 		updateRemote = Instance.new("RemoteEvent")
@@ -94,9 +87,17 @@ local function setupStorage()
 		updateRemote.Parent = remotesFolder
 		debugPrint("Created UpdateBasketDisplay remote")
 	end
+
+	-- NEW: Create BindableEvent for crafting system integration
+	craftingInventoryEvent = remotesFolder:FindFirstChild("BasketInventoryUpdated")
+	if not craftingInventoryEvent then
+		craftingInventoryEvent = Instance.new("BindableEvent")
+		craftingInventoryEvent.Name = "BasketInventoryUpdated"
+		craftingInventoryEvent.Parent = remotesFolder
+		debugPrint("✅ Created BasketInventoryUpdated event for crafting system")
+	end
 end
 
--- Get or create item folder in storage
 local function getItemFolder(itemName)
 	local folder = storageFolder:FindFirstChild(itemName)
 	if not folder then
@@ -108,14 +109,11 @@ local function getItemFolder(itemName)
 	return folder
 end
 
--- Validate item name
 local function isValidItem(itemName)
-	-- If whitelist is empty, allow all items
 	if #Config.VALID_ITEMS == 0 then
 		return true
 	end
 
-	-- Check whitelist
 	for _, validName in ipairs(Config.VALID_ITEMS) do
 		if validName == itemName then
 			return true
@@ -125,16 +123,13 @@ local function isValidItem(itemName)
 	return false
 end
 
--- Simplify model for visual display (remove scripts, anchore parts, disable collisions)
 local function simplifyModelForDisplay(model)
-	-- Remove all scripts
 	for _, obj in pairs(model:GetDescendants()) do
 		if obj:IsA("BaseScript") then
 			obj:Destroy()
 		end
 	end
 
-	-- Anchor all parts and disable collision
 	for _, part in pairs(model:GetDescendants()) do
 		if part:IsA("BasePart") then
 			part.Anchored = true
@@ -144,7 +139,6 @@ local function simplifyModelForDisplay(model)
 		end
 	end
 
-	-- Remove collision groups
 	if model.PrimaryPart then
 		model.PrimaryPart.CollisionGroup = "Default"
 	end
@@ -152,35 +146,28 @@ local function simplifyModelForDisplay(model)
 	return model
 end
 
--- Add item to global storage
 local function addItemToStorage(item)
 	local itemName = item.Name
 
-	-- Validate item name
 	if not isValidItem(itemName) then
 		debugPrint("Item rejected (not in whitelist):", itemName)
 		return false
 	end
 
-	-- Check max stack size
 	local currentCount = GlobalInventory[itemName] or 0
 	if currentCount >= Config.MAX_SAME_ITEM_STORED then
 		warn("[BASKET] Max storage reached for:", itemName)
 		return false
 	end
 
-	-- Get/create item storage folder
 	local itemFolder = getItemFolder(itemName)
 
-	-- Clone and store item
 	local itemClone = item:Clone()
 	itemClone.Name = itemName .. "_" .. (currentCount + 1)
 	itemClone.Parent = itemFolder
 
-	-- Simplify clone for storage
 	simplifyModelForDisplay(itemClone)
 
-	-- Update global count
 	GlobalInventory[itemName] = currentCount + 1
 
 	debugPrint("Stored:", itemName, "| Total:", GlobalInventory[itemName])
@@ -188,12 +175,19 @@ local function addItemToStorage(item)
 	return true
 end
 
--- Broadcast inventory update to all clients
+-- UPDATED: Broadcast to both display AND crafting system
 local function broadcastInventoryUpdate()
 	if updateRemote then
-		-- Send complete inventory data
 		updateRemote:FireAllClients(GlobalInventory)
-		debugPrint("Broadcasted inventory update")
+		debugPrint("Broadcasted to display clients")
+	end
+
+	-- NEW: Fire to crafting system for ALL players
+	if craftingInventoryEvent then
+		for _, player in pairs(Players:GetPlayers()) do
+			craftingInventoryEvent:Fire(player, GlobalInventory)
+		end
+		debugPrint("✅ Sent inventory to crafting system:", GlobalInventory)
 	end
 end
 
@@ -201,71 +195,54 @@ end
 -- TOUCH DETECTION & COLLECTION
 -- ==========================================
 
--- Handle item touching drop zone
 local function onItemTouchedDropZone(dropZone, otherPart)
-	-- Debounce check
 	if touchDebounce[otherPart] then
 		return
 	end
 
-	-- Must be a part
 	if not otherPart:IsA("BasePart") then
 		return
 	end
 
-	-- Find the model (could be part or part's parent)
 	local item = otherPart.Parent
 
-	-- Validate it's a model
 	if not item or not item:IsA("Model") then
 		return
 	end
 
-	-- Must have Collectable tag
 	if not CollectionService:HasTag(item, Config.COLLECTABLE_TAG) then
 		return
 	end
 
-	-- Debounce this item
 	touchDebounce[otherPart] = true
 
 	debugPrint("Item touched drop zone:", item.Name)
 
-	-- Try to store item
 	local success = addItemToStorage(item)
 
 	if success then
-		-- Destroy original item
 		item:Destroy()
-
-		-- Update all clients
 		broadcastInventoryUpdate()
-
 		debugPrint("Successfully collected:", item.Name)
 	else
-		-- Remove debounce if failed
 		touchDebounce[otherPart] = nil
 	end
 
-	-- Clear debounce after delay
 	task.delay(Config.DEBOUNCE_TIME, function()
 		touchDebounce[otherPart] = nil
 	end)
 end
 
--- Setup touch detection on a drop zone
 local function setupDropZone(dropZone)
 	if not dropZone:IsA("BasePart") then
 		warn("[BASKET] DropZone is not a BasePart:", dropZone:GetFullName())
 		return
 	end
 
-	-- Make sure it's configured correctly
 	dropZone.CanCollide = false
 	dropZone.CanTouch = true
 	dropZone.Transparency = 1
 
-	-- Connect touch event
 	dropZone.Touched:Connect(function(otherPart)
 		onItemTouchedDropZone(dropZone, otherPart)
 	end)
@@ -273,14 +250,11 @@ local function setupDropZone(dropZone)
 	debugPrint("Setup drop zone:", dropZone:GetFullName())
 end
 
--- Monitor for new drop zones
 local function monitorDropZones()
-	-- Setup existing drop zones
 	for _, dropZone in pairs(CollectionService:GetTagged(Config.DROPZONE_TAG)) do
 		setupDropZone(dropZone)
 	end
 
-	-- Monitor for new drop zones
 	CollectionService:GetInstanceAddedSignal(Config.DROPZONE_TAG):Connect(function(dropZone)
 		debugPrint("New drop zone detected:", dropZone.Name)
 		setupDropZone(dropZone)
@@ -293,7 +267,6 @@ end
 -- CLEANUP & MAINTENANCE
 -- ==========================================
 
--- Periodic cleanup of invalid stored items
 local function cleanupStorage()
 	local cleanedCount = 0
 
@@ -303,14 +276,12 @@ local function cleanupStorage()
 		if itemFolder then
 			local actualCount = #itemFolder:GetChildren()
 
-			-- Fix count mismatch
 			if actualCount ~= count then
 				warn("[BASKET] Count mismatch for", itemName, "- Expected:", count, "Actual:", actualCount)
 				GlobalInventory[itemName] = actualCount
 				cleanedCount = cleanedCount + 1
 			end
 		else
-			-- Folder missing, reset count
 			GlobalInventory[itemName] = 0
 			cleanedCount = cleanedCount + 1
 		end
@@ -322,7 +293,6 @@ local function cleanupStorage()
 	end
 end
 
--- Auto cleanup loop
 local function startAutoCleanup()
 	task.spawn(function()
 		while true do
@@ -334,46 +304,39 @@ local function startAutoCleanup()
 end
 
 -- ==========================================
--- PUBLIC API (For crafting system integration)
+-- PUBLIC API
 -- ==========================================
 
 local BasketAPI = {}
 
--- Get current inventory
 function BasketAPI.GetInventory()
 	return GlobalInventory
 end
 
--- Get count of specific item
 function BasketAPI.GetItemCount(itemName)
 	return GlobalInventory[itemName] or 0
 end
 
--- Check if player can craft (has required materials)
 function BasketAPI.HasMaterials(requirements)
 	for itemName, requiredAmount in pairs(requirements) do
 		local currentAmount = GlobalInventory[itemName] or 0
 		if currentAmount < requiredAmount then
-			return false, itemName -- Return false and missing item
+			return false, itemName
 		end
 	end
 	return true
 end
 
--- Remove items from storage (for crafting)
 function BasketAPI.RemoveItems(requirements)
-	-- First check if we have enough
 	local hasMaterials, missingItem = BasketAPI.HasMaterials(requirements)
 	if not hasMaterials then
 		warn("[BASKET] Cannot remove items - missing:", missingItem)
 		return false
 	end
 
-	-- Remove items
 	for itemName, amount in pairs(requirements) do
 		local itemFolder = storageFolder:FindFirstChild(itemName)
 		if itemFolder then
-			-- Remove the specified amount
 			local removed = 0
 			for _, storedItem in pairs(itemFolder:GetChildren()) do
 				if removed >= amount then break end
@@ -381,22 +344,18 @@ function BasketAPI.RemoveItems(requirements)
 				removed = removed + 1
 			end
 
-			-- Update count
 			GlobalInventory[itemName] = (GlobalInventory[itemName] or 0) - amount
 			debugPrint("Removed", amount, "x", itemName)
 		end
 	end
 
-	-- Broadcast update
 	broadcastInventoryUpdate()
 	return true
 end
 
--- Add item to storage programmatically (for crafting output)
 function BasketAPI.AddItem(itemName, amount)
 	amount = amount or 1
 
-	-- Find item prefab in ReplicatedStorage
 	local lootItemsFolder = ReplicatedStorage:FindFirstChild("LootItems")
 	if not lootItemsFolder then
 		warn("[BASKET] LootItems folder not found in ReplicatedStorage")
@@ -409,7 +368,6 @@ function BasketAPI.AddItem(itemName, amount)
 		return false
 	end
 
-	-- Add multiple copies
 	for i = 1, amount do
 		local success = addItemToStorage(itemPrefab)
 		if not success then
@@ -418,13 +376,11 @@ function BasketAPI.AddItem(itemName, amount)
 		end
 	end
 
-	-- Broadcast update
 	broadcastInventoryUpdate()
 	debugPrint("Added", amount, "x", itemName, "to basket")
 	return true
 end
 
--- Clear all items (admin/testing)
 function BasketAPI.ClearAll()
 	GlobalInventory = {}
 	for _, folder in pairs(storageFolder:GetChildren()) do
@@ -441,27 +397,20 @@ end
 local function initialize()
 	print("[BASKET SYSTEM] Starting initialization...")
 
-	-- Setup storage and remotes
 	setupStorage()
-
-	-- Monitor drop zones
 	monitorDropZones()
-
-	-- Start auto cleanup
 	startAutoCleanup()
 
-	-- Initial broadcast
 	task.wait(2)
 	broadcastInventoryUpdate()
 
 	print("[BASKET SYSTEM] ✓ Server initialized successfully!")
+	print("[BASKET SYSTEM] ✓ Crafting integration enabled!")
 	print("[BASKET SYSTEM] Drop zones active:", #CollectionService:GetTagged(Config.DROPZONE_TAG))
 end
 
--- Start system
 initialize()
 
--- Make API globally accessible for crafting system
 _G.BasketAPI = BasketAPI
 
 return BasketAPI
