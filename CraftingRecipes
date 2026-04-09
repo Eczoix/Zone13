@@ -1,0 +1,108 @@
+--[[
+	CraftingRecipes.lua
+	ModuleScript - Place in ReplicatedStorage
+	
+	Contains all crafting recipes for the zombie survival game.
+	To add new recipes, simply add a new entry to this table.
+	
+	Recipe Format:
+	["Item Name"] = {
+		tier = 1-3 (which crafting bench tier is required),
+		requirements = {Material = amount, Material2 = amount2},
+		craftTime = seconds (how long crafting takes),
+		category = "Category Name" (Furniture, Tools, Traps, etc.),
+		description = "Text shown in details panel",
+		stats = {"Stat 1", "Stat 2"} (array of stat strings),
+		icon = "🔧" (emoji icon for the item)
+	}
+]]
+
+local CraftingRecipes = {
+
+	-- ===========================
+	-- TIER 1 RECIPES
+	-- ===========================
+
+	["Rusty Pipe"] = {
+		tier = 1,
+		requirements = {metal = 3},
+		craftTime = 3,
+		category = "Tools",
+		description = "Test Bandage",
+		stats = {"Health Regen: +2/min", "Sleep Quality: Basic", "Durability: Low"},
+		icon = "🩹"
+	},
+	
+	["Tier 2 Unlock"] = {
+		icon = "🔓",
+		category = "Tools",
+		description = "Unlock Tier 2 crafting recipes!",
+		tier = 1,  -- Available at Tier 1
+		craftTime = 0,
+		requirements = {
+			ToolBox = 1  -- Costs 1 ToolBox
+		},
+		stats = {
+			"Unlocks: Tier 2 Recipes",
+			"Use: Craft to upgrade"
+		}
+	},
+	-- ===========================
+	-- TIER 2 RECIPES
+	-- ===========================
+
+	["FlashLight"] = {
+		tier = 2,
+		requirements = {Wood = 1, Cloth = 1},
+		craftTime = 4,
+		category = "Light",
+		description = "LET THERE BE LIGHT",
+		stats = {"IT'S LIGHT NO STATS DUMMY"},
+		icon = "🛏️"
+	},
+	["Glove"] = {
+		tier = 2,
+		requirements = {Wood = 1},
+		craftTime = 0,
+		category = "Tool",
+		description = "Slap em away",
+		stats = {"uh idk what to put here"},
+		icon = "🔫"
+	},
+	
+	["Gun"] = {
+		tier = 2,
+		requirements = {Wood = 1},
+		craftTime = 4,
+		category = "Tool",
+		description = "A proper bed with a mattress. Much more comfortable than an old bed.",
+		stats = {"Health Regen: +5/min", "Sleep Quality: Good", "Durability: Medium"},
+		icon = "🔫"
+	},
+
+
+	-- ===========================
+	-- TIER 3 RECIPES
+	-- ===========================
+
+
+	["Test Sword"] = {
+		icon = "🗡️",
+		category = "Weapons",
+		description = "A basic sword for testing. Costs only 1 wood!",
+		tier = 1,
+		craftTime = 2,
+		requirements = {
+			Wood = 1  -- ONLY 1 WOOD FOR TESTING!
+		},
+		stats = {
+			"Damage: 10",
+			"Attack Speed: Fast",
+			"Range: Medium"
+		}
+	}
+} 
+
+
+
+return CraftingRecipes
