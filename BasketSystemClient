@@ -1,6 +1,5 @@
 -- ==========================================
--- GLOBAL BASKET STORAGE SYSTEM - CLIENT
--- Anti-Flicker Update System
+-- GLOBAL BASKET STORAGE SYSTEM - CLIENT (NO GUI VERSION - FIXED)
 -- Place in StarterPlayer > StarterPlayerScripts
 -- Name: BasketSystemClient
 -- ==========================================
@@ -12,7 +11,7 @@ local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
 
-print("[BASKET CLIENT] Loading...")
+print("[BASKET CLIENT] Loading (No GUI version - Fixed Horizontal)...")
 
 -- ==========================================
 -- CONFIGURATION
@@ -21,8 +20,8 @@ print("[BASKET CLIENT] Loading...")
 local Config = {
 	-- Visual folder
 	VISUALS_FOLDER_NAME = "BasketVisuals",
-	VERTICAL_FOLDER_NAME = "Vertical",      -- Stacks upward (calculated)
-	HORIZONTAL_FOLDER_NAME = "Horizontal",  -- Pre-built template (show/hide parts)
+	VERTICAL_FOLDER_NAME = "Vertical",
+	HORIZONTAL_FOLDER_NAME = "Horizontal",
 	VISUAL_PART_NAME = "VisualPart",
 	VISUAL_SUFFIX = "Visual",
 
@@ -30,24 +29,10 @@ local Config = {
 	VISUAL_HEIGHT_OFFSET = 0.5,
 	MAX_VISUAL_STACK = 10,
 
-	-- Label settings
-	LABEL_OFFSET = Vector3.new(0, 3, 0),   -- Vertical stack label offset (above)
-	LABEL_OFFSET_HORIZONTAL = Vector3.new(0, 3, 0), -- Horizontal stack label offset (fixed above model)
-	LABEL_SIZE = UDim2.new(0, 120, 0, 50),
-	LABEL_TEXT_SIZE = 18,
-	LABEL_FONT = Enum.Font.GothamBold,
-	LABEL_MAX_DISTANCE = 35,
-
 	-- Animation settings
 	SPAWN_TWEEN_TIME = 0.4,
 	SPAWN_TWEEN_STYLE = Enum.EasingStyle.Back,
 	SPAWN_TWEEN_DIRECTION = Enum.EasingDirection.Out,
-
-	-- Colors
-	LABEL_BG_COLOR = Color3.fromRGB(0, 0, 0),
-	LABEL_BG_TRANSPARENCY = 0.5,
-	LABEL_TEXT_COLOR = Color3.fromRGB(255, 255, 255),
-	COUNT_TEXT_COLOR = Color3.fromRGB(100, 255, 100),
 
 	-- Performance
 	BATCH_UPDATE_DELAY = 0.1,
@@ -102,7 +87,6 @@ local function waitForResources()
 		return false
 	end
 
-	-- Get vertical and horizontal folders
 	verticalFolder = visualsFolder:FindFirstChild(Config.VERTICAL_FOLDER_NAME)
 	horizontalFolder = visualsFolder:FindFirstChild(Config.HORIZONTAL_FOLDER_NAME)
 
@@ -149,7 +133,6 @@ local function findAllBaskets()
 end
 
 local function getVisualIndicator(materialName)
-	-- Check vertical folder first
 	if verticalFolder then
 		local visual = verticalFolder:FindFirstChild(materialName)
 		if visual then
@@ -157,7 +140,6 @@ local function getVisualIndicator(materialName)
 		end
 	end
 
-	-- Check horizontal folder
 	if horizontalFolder then
 		local visual = horizontalFolder:FindFirstChild(materialName)
 		if visual then
@@ -166,7 +148,6 @@ local function getVisualIndicator(materialName)
 	end
 
 	warn("[BASKET CLIENT] No visual indicator found for:", materialName)
-	warn("[BASKET CLIENT] Check Vertical or Horizontal folders in BasketVisuals!")
 	return nil, nil
 end
 
@@ -176,95 +157,11 @@ local function getPositionPart(visualPartModel, materialName)
 
 	if not posPart or not posPart:IsA("BasePart") then
 		warn("[BASKET CLIENT] No position part found for:", materialName)
-		warn("[BASKET CLIENT] Expected part named:", posPartName)
 		return nil
 	end
 
 	debugPrint("Found position part:", posPartName)
 	return posPart
-end
-
-local function createCountLabel(visual, materialName, count, isHorizontal, positionPart)
-	local attachPart = nil
-
-	-- For horizontal items, attach to the position part (fixed location)
-	if isHorizontal and positionPart then
-		attachPart = positionPart
-	else
-		-- For vertical items, attach to the visual itself
-		if visual:IsA("Model") and visual.PrimaryPart then
-			attachPart = visual.PrimaryPart
-		elseif visual:IsA("BasePart") then
-			attachPart = visual
-		else
-			attachPart = visual:FindFirstChildWhichIsA("BasePart", true)
-		end
-	end
-
-	if not attachPart then
-		warn("[BASKET CLIENT] Could not find part to attach label to")
-		return
-	end
-
-	local attachment = Instance.new("Attachment")
-	attachment.Name = "LabelAttachment_" .. materialName
-
-	-- Adjust label offset based on stacking type
-	if isHorizontal then
-		-- For horizontal, use the horizontal offset (fixed above position part)
-		attachment.Position = Config.LABEL_OFFSET_HORIZONTAL
-	else
-		-- For vertical, offset above
-		attachment.Position = Config.LABEL_OFFSET
-	end
-
-	attachment.Parent = attachPart
-
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "Label_" .. materialName
-	billboard.Size = Config.LABEL_SIZE
-	billboard.Adornee = attachment
-	billboard.AlwaysOnTop = false
-	billboard.MaxDistance = Config.LABEL_MAX_DISTANCE
-	billboard.LightInfluence = 0
-	billboard.Enabled = true
-	billboard.Parent = visual
-
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(1, 0, 1, 0)
-	frame.BackgroundColor3 = Config.LABEL_BG_COLOR
-	frame.BackgroundTransparency = Config.LABEL_BG_TRANSPARENCY
-	frame.BorderSizePixel = 0
-	frame.Parent = billboard
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 8)
-	corner.Parent = frame
-
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(1, -10, 0.5, 0)
-	nameLabel.Position = UDim2.new(0, 5, 0, 2)
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Text = materialName
-	nameLabel.TextColor3 = Config.LABEL_TEXT_COLOR
-	nameLabel.TextSize = Config.LABEL_TEXT_SIZE - 2
-	nameLabel.Font = Config.LABEL_FONT
-	nameLabel.TextXAlignment = Enum.TextXAlignment.Center
-	nameLabel.TextScaled = true
-	nameLabel.Parent = frame
-
-	local countLabel = Instance.new("TextLabel")
-	countLabel.Size = UDim2.new(1, -10, 0.5, -2)
-	countLabel.Position = UDim2.new(0, 5, 0.5, 0)
-	countLabel.BackgroundTransparency = 1
-	countLabel.Text = "x" .. count
-	countLabel.TextColor3 = Config.COUNT_TEXT_COLOR
-	countLabel.TextSize = Config.LABEL_TEXT_SIZE + 4
-	countLabel.Font = Config.LABEL_FONT
-	countLabel.TextXAlignment = Enum.TextXAlignment.Center
-	countLabel.Parent = frame
-
-	debugPrint("Created label for", materialName, "with count", count)
 end
 
 local function createMaterialVisual(stackDisplay, materialName, count, visualPartModel)
@@ -282,13 +179,9 @@ local function createMaterialVisual(stackDisplay, materialName, count, visualPar
 
 	local visualCount = math.min(count, Config.MAX_VISUAL_STACK)
 
-	local materialFolder = Instance.new("Folder")
-	materialFolder.Name = "Stack_" .. materialName
-	materialFolder.Parent = stackDisplay
-
 	debugPrint("Creating", visualCount, stackType, "visual(s) for", materialName)
 
-	-- HORIZONTAL: Pre-built template system
+	-- HORIZONTAL: Pre-built template system (ORIGINAL LOGIC RESTORED!)
 	if stackType == "Horizontal" then
 		-- Clone the entire template model
 		local templateClone = template:Clone()
@@ -363,16 +256,17 @@ local function createMaterialVisual(stackDisplay, materialName, count, visualPar
 		end
 
 		templateClone.Parent = stackDisplay
-		materialFolder:Destroy() -- Don't need the folder for horizontal
 
-		-- Create label at FIXED position (at the position part) for horizontal
-		createCountLabel(templateClone, materialName, count, true, posPart) -- Pass posPart for fixed position
-
+		-- GUI REMOVED: No label creation!
 		debugPrint("Created horizontal template for", materialName, "showing", visualCount, "parts")
 		return templateClone
 	end
 
-	-- VERTICAL: Original stacking system (calculate positions) - DON'T TOUCH THIS
+	-- VERTICAL: Original stacking system
+	local materialFolder = Instance.new("Folder")
+	materialFolder.Name = "Stack_" .. materialName
+	materialFolder.Parent = stackDisplay
+
 	local visualHeight = 0
 	if template:IsA("Model") and template.PrimaryPart then
 		visualHeight = template.PrimaryPart.Size.Y
@@ -435,11 +329,7 @@ local function createMaterialVisual(stackDisplay, materialName, count, visualPar
 		currentOffset = currentOffset + Vector3.new(0, visualHeight, 0)
 	end
 
-	local topVisual = materialFolder:FindFirstChild("Visual_" .. materialName .. "_" .. visualCount)
-	if topVisual then
-		createCountLabel(topVisual, materialName, count, false, nil) -- false = vertical
-	end
-
+	-- GUI REMOVED: No label creation!
 	debugPrint("Created", visualCount, "stacked visual(s) for", materialName)
 	return materialFolder
 end
@@ -472,7 +362,7 @@ local function updateMaterialStack(stackDisplay, materialName, oldCount, newCoun
 	local oldVisualCount = math.min(oldCount, Config.MAX_VISUAL_STACK)
 	local newVisualCount = math.min(newCount, Config.MAX_VISUAL_STACK)
 
-	-- HORIZONTAL: Update visibility of pre-built parts
+	-- HORIZONTAL: Update visibility of pre-built parts (ORIGINAL LOGIC RESTORED!)
 	if stackType == "Horizontal" then
 		-- For horizontal, stackItem IS the template clone (not a folder)
 		-- Show/hide parts based on new count
@@ -498,44 +388,17 @@ local function updateMaterialStack(stackDisplay, materialName, oldCount, newCoun
 			end
 		end
 
-		-- Update label at FIXED position for horizontal
-		for _, child in pairs(stackItem:GetDescendants()) do
-			if child:IsA("BillboardGui") and child.Name:find("Label_") then
-				child:Destroy()
-			end
-		end
-
-		-- Also check the position part for old labels
-		for _, child in pairs(posPart:GetDescendants()) do
-			if child:IsA("BillboardGui") and child.Name:find("Label_") then
-				child:Destroy()
-			end
-		end
-
-		createCountLabel(stackItem, materialName, newCount, true, posPart) -- Fixed position at posPart
-
+		-- GUI REMOVED: No label update!
 		debugPrint("Updated horizontal template for", materialName, "- showing", newVisualCount, "parts")
 		return
 	end
 
-	-- VERTICAL: Original incremental update system - DON'T TOUCH THIS
-	-- For vertical, stackItem IS a folder containing clones
+	-- VERTICAL: Original incremental update system
 	local stackFolder = stackItem
 
 	if oldVisualCount == newVisualCount then
-		local topVisual = stackFolder:FindFirstChild("Visual_" .. materialName .. "_" .. newVisualCount)
-
-		for _, child in pairs(stackFolder:GetDescendants()) do
-			if child:IsA("BillboardGui") and child.Name:find("Label_") then
-				child:Destroy()
-			end
-		end
-
-		if topVisual then
-			createCountLabel(topVisual, materialName, newCount, false, nil) -- false = vertical
-		end
-
-		debugPrint("Updated label only for", materialName, "(visuals unchanged)")
+		-- GUI REMOVED: No label-only update
+		debugPrint("Visual count unchanged for", materialName)
 		return
 	end
 
@@ -619,18 +482,7 @@ local function updateMaterialStack(stackDisplay, materialName, oldCount, newCoun
 		end
 	end
 
-	local topVisualIndex = newVisualCount
-	local topVisual = stackFolder:FindFirstChild("Visual_" .. materialName .. "_" .. topVisualIndex)
-
-	for _, child in pairs(stackFolder:GetDescendants()) do
-		if child:IsA("BillboardGui") and child.Name:find("Label_") then
-			child:Destroy()
-		end
-	end
-
-	if topVisual then
-		createCountLabel(topVisual, materialName, newCount, false, nil) -- false = vertical
-	end
+	-- GUI REMOVED: No label creation!
 end
 
 local function performUpdate(inventory)
@@ -720,61 +572,13 @@ local function initialize()
 		updateAllBaskets(currentInventory)
 	end)
 
-	-- Distance-based label visibility (FIXED - Simple version)
-	task.spawn(function()
-		while true do
-			task.wait(0.3)  -- Check every 0.3 seconds
-
-			local character = player.Character
-			if not character then continue end
-
-			local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-			if not humanoidRootPart then continue end
-
-			local playerPos = humanoidRootPart.Position
-
-			local baskets = findAllBaskets()
-			for _, basketData in pairs(baskets) do
-				local basketPos = nil
-				if basketData.Model.PrimaryPart then
-					basketPos = basketData.Model.PrimaryPart.Position
-				else
-					local part = basketData.Model:FindFirstChildWhichIsA("BasePart", true)
-					if part then
-						basketPos = part.Position
-					end
-				end
-
-				if basketPos then
-					local distance = (playerPos - basketPos).Magnitude
-					local shouldShow = distance <= Config.LABEL_MAX_DISTANCE
-
-					-- Update ALL labels in this basket at once
-					local stackDisplay = basketData.StackDisplay
-					for _, child in pairs(stackDisplay:GetDescendants()) do
-						if child:IsA("BillboardGui") and child.Name:find("Label_") then
-							child.Enabled = shouldShow
-						end
-					end
-
-					-- Also check labels on position parts (for horizontal)
-					local visualPart = basketData.VisualPart
-					for _, child in pairs(visualPart:GetDescendants()) do
-						if child:IsA("BillboardGui") and child.Name:find("Label_") then
-							child.Enabled = shouldShow
-						end
-					end
-				end
-			end
-		end
-	end)
-
 	task.wait(3)
 	debugPrint("Client ready")
 
-	print("[BASKET CLIENT] ✓ System loaded successfully!")
+	print("[BASKET CLIENT] ✓ System loaded successfully (No GUI, Fixed Horizontal)!")
 	print("[BASKET CLIENT] Visual indicators folder:", Config.VISUALS_FOLDER_NAME)
-	print("[BASKET CLIENT] Label visibility distance:", Config.LABEL_MAX_DISTANCE, "studs")
+	print("[BASKET CLIENT] Horizontal stacking: Uses transparency (FIXED)")
+	print("[BASKET CLIENT] Vertical stacking: Uses create/destroy")
 end
 
 initialize()
