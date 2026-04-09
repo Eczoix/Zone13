@@ -62,17 +62,17 @@ local function createCounterGui(attachTo)
 
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "SackCounter"
-	billboard.Size = UDim2.new(2, 0, 1, 0)
-	billboard.StudsOffset = Vector3.new(0, 2, 0)
+	billboard.Size = UDim2.new(0, 120, 0, 50)
+	billboard.StudsOffset = Vector3.new(0, 1.5, 0)
 	billboard.AlwaysOnTop = true
 	billboard.LightInfluence = 0
 	billboard.Adornee = attachTo
-	billboard.Parent = playerGui
+	billboard.Parent = attachTo
 
 	local frame = Instance.new("Frame")
 	frame.Size = UDim2.new(1, 0, 1, 0)
 	frame.BackgroundColor3 = Color3.new(0, 0, 0)
-	frame.BackgroundTransparency = 0.3
+	frame.BackgroundTransparency = 0.4
 	frame.BorderSizePixel = 0
 	frame.Parent = billboard
 
@@ -86,7 +86,7 @@ local function createCounterGui(attachTo)
 	label.BackgroundTransparency = 1
 	label.Text = currentCount .. "/" .. maxCapacity
 	label.TextColor3 = Color3.new(1, 1, 1)
-	label.TextScaled = true
+	label.TextSize = 24
 	label.Font = Enum.Font.GothamBold
 	label.Parent = frame
 
@@ -123,45 +123,45 @@ local function createMobileInteractionGui()
 	mobileGui.ResetOnSpawn = false
 	mobileGui.Parent = playerGui
 
-	-- Store button (circular, matching your UI style)
+	-- Store button (LEFT position - ABOVE sprint button)
 	local storeBtn = Instance.new("TextButton")
 	storeBtn.Name = "StoreButton"
-	storeBtn.Size = UDim2.new(0, 60, 0, 60)
-	storeBtn.Position = UDim2.new(1, -160, 1, -160)
-	storeBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	storeBtn.BackgroundTransparency = 0.3
-	storeBtn.BorderSizePixel = 2
-	storeBtn.BorderColor3 = Color3.fromRGB(100, 255, 100)
-	storeBtn.Text = "Store"
-	storeBtn.TextColor3 = Color3.fromRGB(100, 255, 100)
-	storeBtn.TextSize = 14
+	storeBtn.Size = UDim2.new(0, 50, 0, 50)
+	storeBtn.Position = UDim2.new(1, -145, 1, -145)
+	storeBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+	storeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+	storeBtn.BackgroundTransparency = 0.2
+	storeBtn.BorderSizePixel = 0
+	storeBtn.Text = "STORE"
+	storeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	storeBtn.TextSize = 11
 	storeBtn.Font = Enum.Font.GothamBold
 	storeBtn.Visible = false
 	storeBtn.Parent = mobileGui
 
 	local storeCorner = Instance.new("UICorner")
-	storeCorner.CornerRadius = UDim.new(0.5, 0)
+	storeCorner.CornerRadius = UDim.new(0.25, 0)
 	storeCorner.Parent = storeBtn
 
-	-- Undrag/Drop button
-	local undragBtn = Instance.new("TextButton")
-	undragBtn.Name = "UndragButton"
-	undragBtn.Size = UDim2.new(0, 60, 0, 60)
-	undragBtn.Position = UDim2.new(1, -180, 1, -100)
-	undragBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-	undragBtn.BackgroundTransparency = 0.3
-	undragBtn.BorderSizePixel = 2
-	undragBtn.BorderColor3 = Color3.fromRGB(255, 100, 100)
-	undragBtn.Text = "Unstore"
-	undragBtn.TextColor3 = Color3.fromRGB(255, 100, 100)
-	undragBtn.TextSize = 14
-	undragBtn.Font = Enum.Font.GothamBold
-	undragBtn.Visible = false
-	undragBtn.Parent = mobileGui
+	-- Drop/Unstore button (RIGHT position - ABOVE sprint button)
+	local dropBtn = Instance.new("TextButton")
+	dropBtn.Name = "DropButton"
+	dropBtn.Size = UDim2.new(0, 50, 0, 50)
+	dropBtn.Position = UDim2.new(1, -65, 1, -145) -- Moved more to the right (was -75)
+	dropBtn.AnchorPoint = Vector2.new(0.5, 0.5)
+	dropBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+	dropBtn.BackgroundTransparency = 0.2
+	dropBtn.BorderSizePixel = 0
+	dropBtn.Text = "DROP"
+	dropBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	dropBtn.TextSize = 11
+	dropBtn.Font = Enum.Font.GothamBold
+	dropBtn.Visible = false
+	dropBtn.Parent = mobileGui
 
-	local undragCorner = Instance.new("UICorner")
-	undragCorner.CornerRadius = UDim.new(0.5, 0)
-	undragCorner.Parent = undragBtn
+	local dropCorner = Instance.new("UICorner")
+	dropCorner.CornerRadius = UDim.new(0.25, 0)
+	dropCorner.Parent = dropBtn
 
 	-- Store button functionality
 	storeBtn.MouseButton1Click:Connect(function()
@@ -173,8 +173,8 @@ local function createMobileInteractionGui()
 		end
 	end)
 
-	-- Drop button functionality (renamed from undragBtn to match button)
-	undragBtn.MouseButton1Click:Connect(function()
+	-- Drop button functionality
+	dropBtn.MouseButton1Click:Connect(function()
 		print("[SACK CLIENT] Drop button clicked")
 		if currentCount > 0 then
 			dropRemote:FireServer()
@@ -182,7 +182,7 @@ local function createMobileInteractionGui()
 		end
 	end)
 
-	mobileButtons = {store = storeBtn, drop = undragBtn}
+	mobileButtons = {store = storeBtn, drop = dropBtn}
 	print("[SACK CLIENT] Mobile buttons created")
 
 	return mobileButtons
