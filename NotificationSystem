@@ -1,0 +1,106 @@
+-- 📢 NOTIFICATION SYSTEM (Minimal Text Version)
+-- Simple text notifications below the HUD
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Wait for remote
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+local notificationRemote = remotes:WaitForChild("ShowNotification", 10)
+
+if not notificationRemote then
+	warn("ShowNotification remote not found!")
+	return
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       NOTIFICATION UI
+-- ═══════════════════════════════════════════════════════════════
+
+local notificationGui = Instance.new("ScreenGui")
+notificationGui.Name = "NotificationSystem"
+notificationGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+notificationGui.DisplayOrder = 100
+notificationGui.Parent = playerGui
+
+-- Simple text label
+local notificationText = Instance.new("TextLabel")
+notificationText.Name = "NotificationText"
+notificationText.Size = UDim2.new(0.5, 0, 0.08, 0)  -- Using scale
+notificationText.Position = UDim2.new(0.5, 0, 0.12, 0)  -- Below your HUD (around 15% from top)
+notificationText.AnchorPoint = Vector2.new(0.5, 0)
+notificationText.BackgroundTransparency = 1  -- No background
+notificationText.BorderSizePixel = 0
+notificationText.Text = ""
+notificationText.TextColor3 = Color3.fromRGB(255, 255, 255)
+notificationText.TextScaled = true
+notificationText.Font = Enum.Font.GothamBold
+notificationText.TextTransparency = 1  -- Start invisible
+notificationText.TextStrokeTransparency = 0.5  -- Outline for readability
+notificationText.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+notificationText.Parent = notificationGui
+
+-- Text size constraint
+local textConstraint = Instance.new("UITextSizeConstraint")
+textConstraint.MaxTextSize = 32
+textConstraint.MinTextSize = 12
+textConstraint.Parent = notificationText
+
+local notificationQueue = {}
+local isShowingNotification = false
+
+-- ═══════════════════════════════════════════════════════════════
+--                       SHOW NOTIFICATION
+-- ═══════════════════════════════════════════════════════════════
+
+local function showNotification(data)
+	-- Set text and color
+	notificationText.Text = data.title or "Notification"
+	notificationText.TextColor3 = data.titleColor or Color3.fromRGB(255, 255, 255)
+
+	-- Fade in
+	local fadeIn = TweenService:Create(notificationText, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		TextTransparency = 0
+	})
+	fadeIn:Play()
+
+	-- Wait for duration
+	local duration = data.duration or 3
+	task.wait(duration)
+
+	-- Fade out
+	local fadeOut = TweenService:Create(notificationText, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		TextTransparency = 1
+	})
+	fadeOut:Play()
+	fadeOut.Completed:Wait()
+
+	-- Clear text
+	notificationText.Text = ""
+
+	-- Process next in queue
+	isShowingNotification = false
+	if #notificationQueue > 0 then
+		local nextNotification = table.remove(notificationQueue, 1)
+		showNotification(nextNotification)
+	end
+end
+
+local function queueNotification(data)
+	if isShowingNotification then
+		table.insert(notificationQueue, data)
+	else
+		isShowingNotification = true
+		showNotification(data)
+	end
+end
+
+notificationRemote.OnClientEvent:Connect(function(data)
+	queueNotification(data)
+end)
+
+print("✅ Notification System initialized (minimal text version)!")
