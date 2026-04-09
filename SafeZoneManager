@@ -1,0 +1,216 @@
+-- 🏠 SAFE ZONE MANAGER (Server)
+-- Handles zombie damage, player protection, and zone tracking
+
+local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+-- Modules
+local SafeZoneConfig = require(ReplicatedStorage:WaitForChild("SafeZoneConfig"))
+
+-- Tracking
+local playersInSafeZones = {} -- {[player] = zoneID}
+local zombiesInSafeZones = {} -- {[zombie] = true}
+
+-- Remote for client communication
+local SafeZoneRemote = Instance.new("RemoteEvent")
+SafeZoneRemote.Name = "SafeZoneRemote"
+SafeZoneRemote.Parent = ReplicatedStorage
+
+-- ═══════════════════════════════════════════════════════════════
+--                       PLAYER TRACKING
+-- ═══════════════════════════════════════════════════════════════
+
+-- Check if player entered/exited safe zone
+local function updatePlayerSafeZone(player)
+	local inSafeZone, zoneID = SafeZoneConfig:IsPlayerInSafeZone(player)
+	local wasInSafeZone = playersInSafeZones[player]
+
+	-- Player entered safe zone
+	if inSafeZone and not wasInSafeZone then
+		playersInSafeZones[player] = zoneID
+
+		-- Notify client
+		SafeZoneRemote:FireClient(player, "Entered", zoneID, SafeZoneConfig.Zones[zoneID])
+
+		print(player.Name .. " entered safe zone:", SafeZoneConfig.Zones[zoneID].Name)
+
+		-- Player exited safe zone
+	elseif not inSafeZone and wasInSafeZone then
+		local exitedZone = playersInSafeZones[player]
+		playersInSafeZones[player] = nil
+
+		-- Notify client
+		SafeZoneRemote:FireClient(player, "Exited", exitedZone)
+
+		print(player.Name .. " exited safe zone")
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       ZOMBIE DAMAGE SYSTEM
+-- ═══════════════════════════════════════════════════════════════
+
+-- Check zombies and apply damage if in safe zone
+local function checkZombieSafeZones()
+	for _, zombie in ipairs(CollectionService:GetTagged("Enemy")) do
+		if zombie and zombie.Parent then
+			local inSafeZone = SafeZoneConfig:IsZombieInSafeZone(zombie)
+
+			if inSafeZone then
+				-- Apply damage
+				local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+				if humanoid and humanoid.Health > 0 then
+					humanoid:TakeDamage(SafeZoneConfig.Settings.ZombieDamagePerSecond * SafeZoneConfig.Settings.ZombieCheckInterval)
+
+					-- Mark as in safe zone (for AI to ignore)
+					if not zombiesInSafeZones[zombie] then
+						zombiesInSafeZones[zombie] = true
+					end
+				end
+			else
+				-- Remove from tracking if they left
+				if zombiesInSafeZones[zombie] then
+					zombiesInSafeZones[zombie] = nil
+				end
+			end
+		end
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       PLAYER PROTECTION
+-- ═══════════════════════════════════════════════════════════════
+
+-- Check if player can be targeted by zombie AI
+function isPlayerTargetable(player)
+	return not playersInSafeZones[player]
+end
+
+-- Expose this function globally for zombie AI
+_G.IsPlayerInSafeZone = function(player)
+	return playersInSafeZones[player] ~= nil
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       SAFE ZONE UNLOCKING
+-- ═══════════════════════════════════════════════════════════════
+
+-- Unlock a safe zone
+local function unlockSafeZone(zoneID)
+	if SafeZoneConfig:UnlockZone(zoneID) then
+		print("✅ Safe zone unlocked:", SafeZoneConfig.Zones[zoneID].Name)
+
+		-- Notify all clients
+		for _, player in ipairs(Players:GetPlayers()) do
+			SafeZoneRemote:FireClient(player, "Unlocked", zoneID, SafeZoneConfig.Zones[zoneID])
+		end
+
+		return true
+	end
+	return false
+end
+
+-- Listen for unlock requests from client (via quests, etc.)
+SafeZoneRemote.OnServerEvent:Connect(function(player, action, zoneID)
+	if action == "RequestUnlock" then
+		-- Add your unlock validation here (check quest completion, items, etc.)
+		unlockSafeZone(zoneID)
+	end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--                       VISUAL BORDERS (Optional)
+-- ═══════════════════════════════════════════════════════════════
+
+local function createSafeZoneBorder(zonePart)
+	if not SafeZoneConfig.Settings.ShowBorders then return end
+
+	-- Create selection box for visual border
+	local border = Instance.new("SelectionBox")
+	border.Name = "SafeZoneBorder"
+	border.Adornee = zonePart
+	border.Color3 = SafeZoneConfig.Settings.SafeZoneBorderColor
+	border.LineThickness = 0.05
+	border.Transparency = SafeZoneConfig.Settings.BorderTransparency
+	border.Parent = zonePart
+end
+
+-- Setup borders for all safe zone parts
+local function setupSafeZoneBorders()
+	local safeZonesFolder = workspace:FindFirstChild("SafeZones")
+
+	if not safeZonesFolder then
+		warn("⚠️ SafeZones folder not found in Workspace! Please create it.")
+		return
+	end
+
+	for _, zoneData in pairs(SafeZoneConfig.Zones) do
+		local part = safeZonesFolder:FindFirstChild(zoneData.PartName)
+		if part and part:IsA("BasePart") then
+			-- Make part invisible but collidable
+			part.Transparency = 1
+			part.CanCollide = false -- Players can walk through
+
+			-- Add border only if ShowBorder is true
+			if zoneData.ShowBorder == true then
+				createSafeZoneBorder(part)
+			end
+		else
+			warn("⚠️ Safe zone part not found:", zoneData.PartName, "in SafeZones folder")
+		end
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       INITIALIZATION
+-- ═══════════════════════════════════════════════════════════════
+
+-- Setup existing players
+for _, player in ipairs(Players:GetPlayers()) do
+	playersInSafeZones[player] = nil
+end
+
+-- Handle new players
+Players.PlayerAdded:Connect(function(player)
+	playersInSafeZones[player] = nil
+
+	-- Send current safe zone states
+	task.wait(1)
+	SafeZoneRemote:FireClient(player, "Init", SafeZoneConfig.Zones)
+end)
+
+-- Handle players leaving
+Players.PlayerRemoving:Connect(function(player)
+	playersInSafeZones[player] = nil
+end)
+
+-- Setup visual borders
+setupSafeZoneBorders()
+
+-- ═══════════════════════════════════════════════════════════════
+--                       MAIN UPDATE LOOPS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Player tracking loop (checks every 0.5 seconds)
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+
+		for _, player in ipairs(Players:GetPlayers()) do
+			updatePlayerSafeZone(player)
+		end
+	end
+end)
+
+-- Zombie damage loop
+task.spawn(function()
+	while true do
+		task.wait(SafeZoneConfig.Settings.ZombieCheckInterval)
+		checkZombieSafeZones()
+	end
+end)
+
+print("✅ Safe Zone Manager initialized!")
+print("📊 Loaded zones:", #SafeZoneConfig:GetUnlockedZones(), "unlocked")
