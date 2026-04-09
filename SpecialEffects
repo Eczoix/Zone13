@@ -1,0 +1,197 @@
+-- ✨ SPECIAL EFFECTS MODULE
+-- Handles damage-over-time and status effects for weapons
+
+local SpecialEffects = {}
+
+local Players = game:GetService("Players")
+local Debris = game:GetService("Debris")
+
+-- Active effects tracking (prevents stacking same effect)
+local activeEffects = {}
+
+-- ═══════════════════════════════════════════════════════════════
+--                         EFFECT HANDLERS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Apply Poison/Burn (Damage Over Time)
+local function applyDamageOverTime(character, effectConfig, effectType)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
+
+	-- Get unique identifier for this character
+	local characterId = character:GetFullName()
+
+	-- Check if effect is already active
+	local effectKey = characterId .. "_" .. effectType
+	if activeEffects[effectKey] then
+		return -- Don't stack
+	end
+
+	activeEffects[effectKey] = true
+
+	-- Visual feedback
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		local effectPart = Instance.new("Part")
+		effectPart.Name = effectType .. "Effect"
+		effectPart.Size = Vector3.new(3, 3, 3)
+		effectPart.Shape = Enum.PartType.Ball
+		effectPart.Material = Enum.Material.Neon
+		effectPart.Color = effectConfig.Color or Color3.fromRGB(0, 255, 0)
+		effectPart.Anchored = true
+		effectPart.CanCollide = false
+		effectPart.Transparency = 0.7
+		effectPart.CFrame = rootPart.CFrame
+		effectPart.Parent = workspace
+
+		-- Attach to character
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = effectPart
+		weld.Part1 = rootPart
+		weld.Parent = effectPart
+
+		Debris:AddItem(effectPart, effectConfig.Duration)
+	end
+
+	-- Apply damage over time
+	local tickCount = math.floor(effectConfig.Duration / effectConfig.TickInterval)
+
+	task.spawn(function()
+		for i = 1, tickCount do
+			task.wait(effectConfig.TickInterval)
+
+			if humanoid and humanoid.Health > 0 then
+				humanoid:TakeDamage(effectConfig.DamagePerTick)
+			else
+				break
+			end
+		end
+
+		-- Remove from active effects
+		activeEffects[effectKey] = nil
+	end)
+end
+
+-- Apply Slow Effect
+local function applySlowEffect(character, effectConfig)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
+
+	local characterId = character:GetFullName()
+	local effectKey = characterId .. "_Slow"
+	if activeEffects[effectKey] then return end
+
+	activeEffects[effectKey] = true
+
+	-- Visual feedback
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		local effectPart = Instance.new("Part")
+		effectPart.Name = "SlowEffect"
+		effectPart.Size = Vector3.new(3, 0.5, 3)
+		effectPart.Shape = Enum.PartType.Cylinder
+		effectPart.Material = Enum.Material.Ice
+		effectPart.Color = effectConfig.Color or Color3.fromRGB(100, 200, 255)
+		effectPart.Anchored = true
+		effectPart.CanCollide = false
+		effectPart.Transparency = 0.5
+		effectPart.CFrame = rootPart.CFrame
+		effectPart.Orientation = Vector3.new(0, 0, 90)
+		effectPart.Parent = workspace
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = effectPart
+		weld.Part1 = rootPart
+		weld.Parent = effectPart
+
+		Debris:AddItem(effectPart, effectConfig.Duration)
+	end
+
+	-- Reduce walk speed
+	local originalSpeed = humanoid.WalkSpeed
+	local slowedSpeed = originalSpeed * (1 - effectConfig.SlowPercent / 100)
+	humanoid.WalkSpeed = slowedSpeed
+
+	-- Restore after duration
+	task.delay(effectConfig.Duration, function()
+		if humanoid then
+			humanoid.WalkSpeed = originalSpeed
+		end
+		activeEffects[effectKey] = nil
+	end)
+end
+
+-- Apply Stun Effect
+local function applyStunEffect(character, effectConfig)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then return end
+
+	local characterId = character:GetFullName()
+	local effectKey = characterId .. "_Stun"
+	if activeEffects[effectKey] then return end
+
+	activeEffects[effectKey] = true
+
+	-- Visual feedback
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		local effectPart = Instance.new("Part")
+		effectPart.Name = "StunEffect"
+		effectPart.Size = Vector3.new(4, 4, 4)
+		effectPart.Shape = Enum.PartType.Ball
+		effectPart.Material = Enum.Material.Neon
+		effectPart.Color = effectConfig.Color or Color3.fromRGB(255, 255, 0)
+		effectPart.Anchored = true
+		effectPart.CanCollide = false
+		effectPart.Transparency = 0.6
+		effectPart.CFrame = rootPart.CFrame
+		effectPart.Parent = workspace
+
+		local weld = Instance.new("WeldConstraint")
+		weld.Part0 = effectPart
+		weld.Part1 = rootPart
+		weld.Parent = effectPart
+
+		Debris:AddItem(effectPart, effectConfig.Duration)
+	end
+
+	-- Freeze character
+	local originalSpeed = humanoid.WalkSpeed
+	local originalJump = humanoid.JumpPower
+	humanoid.WalkSpeed = 0
+	humanoid.JumpPower = 0
+
+	-- Restore after duration
+	task.delay(effectConfig.Duration, function()
+		if humanoid then
+			humanoid.WalkSpeed = originalSpeed
+			humanoid.JumpPower = originalJump
+		end
+		activeEffects[effectKey] = nil
+	end)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                         MAIN APPLY FUNCTION
+-- ═══════════════════════════════════════════════════════════════
+
+function SpecialEffects:ApplyEffect(character, effectConfig)
+	if not effectConfig or not character then return end
+
+	local effectType = effectConfig.Type
+
+	if effectType == "Poison" or effectType == "Burn" then
+		applyDamageOverTime(character, effectConfig, effectType)
+
+	elseif effectType == "Slow" then
+		applySlowEffect(character, effectConfig)
+
+	elseif effectType == "Stun" then
+		applyStunEffect(character, effectConfig)
+
+	else
+		warn("Unknown effect type: " .. tostring(effectType))
+	end
+end
+
+return SpecialEffects
