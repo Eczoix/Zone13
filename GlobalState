@@ -3,22 +3,54 @@ local GlobalState = {}
 -- Game State Variables
 GlobalState.isNight = false
 GlobalState.currentDay = 1
+GlobalState.currentWeather = "Clear"
 
 -- Time Configuration
-GlobalState.DAY_LENGTH = 100      -- 10 minutes total cycle
-GlobalState.NIGHT_START = 0.75      -- Night starts at 75% through cycle
-GlobalState.NIGHT_END = 0.25        -- Night ends at 25% through cycle
+GlobalState.DAY_LENGTH = 300      -- 5 minutes total cycle (set by TimeManager)
+GlobalState.gameStartTime = tick() -- Will be set by TimeManager
 
--- Shift start time to 30% into the cycle (dawn)
-GlobalState.gameStartTime = tick() - (GlobalState.DAY_LENGTH * 0.3)
-GlobalState.lastDayChange = tick()
+-- Time ranges (as percentages of the cycle, 0-1)
+GlobalState.NIGHT_START = 0.75    -- Night starts at 75% through cycle
+GlobalState.NIGHT_END = 0.25      -- Night ends at 25% through cycle
 
--- Events (create these as RemoteEvents in ReplicatedStorage)
+-- Weather Configuration
+GlobalState.WEATHER_CHANGE_INTERVAL = 180
+GlobalState.lastWeatherChange = tick()
+
+GlobalState.WeatherTypes = {
+	Clear = {
+		name = "Clear",
+		icon = "☀️",
+		probability = 0.4,
+		canOccurAtNight = true
+	},
+	Rain = {
+		name = "Rain",
+		icon = "🌧️",
+		probability = 0.25,
+		canOccurAtNight = true
+	},
+	Fog = {
+		name = "Fog",
+		icon = "🌫️",
+		probability = 0.20,
+		canOccurAtNight = true
+	},
+	Storm = {
+		name = "Storm",
+		icon = "⛈️",
+		probability = 0.15,
+		canOccurAtNight = true
+	}
+}
+
+-- Events
 GlobalState.Events = {
-	"TimeUpdate",           -- Server -> Client time sync
-	"DayNightChange",       -- Server -> Client day/night toggle
-	"PlayerSpawned",        -- Client -> Server player ready
-	"GameStateRequest"      -- Client -> Server state request
+	"TimeUpdate",
+	"DayNightChange",
+	"WeatherChange",
+	"PlayerSpawned",
+	"GameStateRequest"
 }
 
 -- Create RemoteEvents folder structure
@@ -45,45 +77,102 @@ function GlobalState:GetCycleProgress()
 	return elapsed / self.DAY_LENGTH
 end
 
--- Check if it's currently night
-function GlobalState:IsNight()
+-- Get VISUAL progress for the progress bar (0% at 7 AM, 100% at next 7 AM)
+function GlobalState:GetVisualProgress()
 	local progress = self:GetCycleProgress()
-	return progress >= self.NIGHT_START or progress <= self.NIGHT_END
+
+	-- 7 AM = 420 minutes = 420/1440 = 0.2917 of the day
+	local startOffset = 0.2917
+
+	-- Shift so 7 AM becomes 0%
+	local visualProgress = progress - startOffset
+	if visualProgress < 0 then
+		visualProgress = visualProgress + 1  -- Wrap around
+	end
+
+	return visualProgress
 end
 
--- Get time remaining in current phase
+-- Check if it's currently night (based on cycle progress)
+function GlobalState:IsNight()
+	local progress = self:GetCycleProgress()
+	-- Night is from 75% to 25% (wrapping around)
+	return progress >= self.NIGHT_START or progress < self.NIGHT_END
+end
+
+-- Get time remaining in entire day cycle (until next 7 AM)
 function GlobalState:GetTimeRemaining()
 	local progress = self:GetCycleProgress()
-	local timeLeft
 
-	if self:IsNight() then
-		-- Calculate time until dawn
-		if progress >= self.NIGHT_START then
-			timeLeft = (1 - progress + self.NIGHT_END) * self.DAY_LENGTH
-		else
-			timeLeft = (self.NIGHT_END - progress) * self.DAY_LENGTH
-		end
-	else
-		-- Calculate time until dusk
-		timeLeft = (self.NIGHT_START - progress) * self.DAY_LENGTH
+	-- 7 AM = 0.2917 of the day
+	local startOffset = 0.2917
+
+	-- Shift progress to match visual cycle (7 AM = 0%)
+	local shiftedProgress = progress - startOffset
+	if shiftedProgress < 0 then
+		shiftedProgress = shiftedProgress + 1
 	end
+
+	-- Calculate time remaining until next 7 AM (100% = next cycle start)
+	local timeLeft = (1 - shiftedProgress) * self.DAY_LENGTH
 
 	return math.max(0, timeLeft)
 end
 
--- Get current time of day string
+-- Get current time of day string (scaled for 5-minute cycle)
 function GlobalState:GetTimeOfDay()
 	local progress = self:GetCycleProgress()
 
+	-- Scaled ranges for 5-minute cycle:
+	-- 0% - 25%: Night
+	-- 25% - 30%: Dawn (short transition)
+	-- 30% - 75%: Day
+	-- 75% - 80%: Dusk (short transition)
+	-- 80% - 100%: Night
+
 	if progress < 0.25 then
 		return "Night"
-	elseif progress < 0.4 then
+	elseif progress < 0.30 then
 		return "Dawn"
 	elseif progress < 0.75 then
 		return "Day"
-	else
+	elseif progress < 0.80 then
 		return "Dusk"
+	else
+		return "Night"
 	end
+end
+
+-- Check if it's time to change weather
+function GlobalState:ShouldChangeWeather()
+	return (tick() - self.lastWeatherChange) >= self.WEATHER_CHANGE_INTERVAL
+end
+
+-- Get random weather based on probabilities
+function GlobalState:GetRandomWeather()
+	local rand = math.random()
+	local cumulative = 0
+
+	-- Sort weather types by name for consistent ordering
+	local sortedWeather = {}
+	for weatherType, data in pairs(self.WeatherTypes) do
+		table.insert(sortedWeather, {name = weatherType, data = data})
+	end
+	table.sort(sortedWeather, function(a, b) return a.name < b.name end)
+
+	for _, weather in ipairs(sortedWeather) do
+		cumulative = cumulative + weather.data.probability
+		if rand <= cumulative then
+			return weather.name
+		end
+	end
+
+	return "Clear"
+end
+
+-- Get weather data
+function GlobalState:GetWeatherData(weatherType)
+	return self.WeatherTypes[weatherType or self.currentWeather]
 end
 
 return GlobalState
