@@ -1,0 +1,289 @@
+-- 💚 ZOMBIE HEALTH BAR SYSTEM
+-- Professional health bars above zombie heads
+-- Only shows when damaged
+
+local CollectionService = game:GetService("CollectionService")
+local TweenService = game:GetService("TweenService")
+local Players = game:GetService("Players")
+
+local player = Players.LocalPlayer
+
+-- Settings
+local HEALTH_BAR_SETTINGS = {
+	Size = UDim2.new(0, 120, 0, 12),
+	CornerRadius = UDim.new(0.4, 0),
+	BackgroundColor = Color3.fromRGB(20, 20, 25),
+	BackgroundTransparency = 0.3,
+
+	FillColors = {
+		High = Color3.fromRGB(46, 204, 113),    -- Green (>60%)
+		Medium = Color3.fromRGB(241, 196, 15),  -- Yellow (30-60%)
+		Low = Color3.fromRGB(231, 76, 60)       -- Red (<30%)
+	},
+
+	BorderColor = Color3.fromRGB(255, 255, 255),
+	BorderThickness = 1.5,
+	BorderTransparency = 0.7,
+
+	StudsOffset = Vector3.new(0, 3.5, 0),  -- Above head
+	ShowDistance = 100,  -- Only show within 100 studs
+	FadeInTime = 0.3,
+	FadeOutTime = 0.5,
+	HideDelay = 3  -- Hide after 3 seconds at full health
+}
+
+-- Track active health bars
+local activeHealthBars = {}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       CREATE HEALTH BAR
+-- ═══════════════════════════════════════════════════════════════
+
+local function createHealthBar(zombie)
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	local head = zombie:FindFirstChild("Head") or zombie.PrimaryPart
+
+	if not humanoid or not head then return end
+
+	-- Create BillboardGui
+	local billboard = Instance.new("BillboardGui")
+	billboard.Name = "HealthBar"
+	billboard.Size = UDim2.new(0, 130, 0, 20)
+	billboard.StudsOffset = HEALTH_BAR_SETTINGS.StudsOffset
+	billboard.AlwaysOnTop = false
+	billboard.MaxDistance = HEALTH_BAR_SETTINGS.ShowDistance
+	billboard.Parent = head
+
+	-- Container frame
+	local container = Instance.new("Frame")
+	container.Name = "Container"
+	container.Size = UDim2.new(1, 0, 1, 0)
+	container.BackgroundTransparency = 1
+	container.Parent = billboard
+
+	-- Background track
+	local background = Instance.new("Frame")
+	background.Name = "Background"
+	background.Size = HEALTH_BAR_SETTINGS.Size
+	background.Position = UDim2.new(0.5, 0, 0.5, 0)
+	background.AnchorPoint = Vector2.new(0.5, 0.5)
+	background.BackgroundColor3 = HEALTH_BAR_SETTINGS.BackgroundColor
+	background.BackgroundTransparency = HEALTH_BAR_SETTINGS.BackgroundTransparency
+	background.BorderSizePixel = 0
+	background.Parent = container
+
+	local bgCorner = Instance.new("UICorner")
+	bgCorner.CornerRadius = HEALTH_BAR_SETTINGS.CornerRadius
+	bgCorner.Parent = background
+
+	local bgStroke = Instance.new("UIStroke")
+	bgStroke.Color = HEALTH_BAR_SETTINGS.BorderColor
+	bgStroke.Thickness = HEALTH_BAR_SETTINGS.BorderThickness
+	bgStroke.Transparency = HEALTH_BAR_SETTINGS.BorderTransparency
+	bgStroke.Parent = background
+
+	-- Health fill bar
+	local healthFill = Instance.new("Frame")
+	healthFill.Name = "HealthFill"
+	healthFill.Size = UDim2.new(1, -4, 1, -4)
+	healthFill.Position = UDim2.new(0, 2, 0, 2)
+	healthFill.BackgroundColor3 = HEALTH_BAR_SETTINGS.FillColors.High
+	healthFill.BorderSizePixel = 0
+	healthFill.Parent = background
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = HEALTH_BAR_SETTINGS.CornerRadius
+	fillCorner.Parent = healthFill
+
+	-- Gradient for polish
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(200, 200, 200))
+	}
+	gradient.Rotation = 90
+	gradient.Parent = healthFill
+
+	-- Start hidden
+	billboard.Enabled = false
+
+	return billboard, healthFill
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       UPDATE HEALTH BAR
+-- ═══════════════════════════════════════════════════════════════
+
+local function getHealthColor(healthPercent)
+	if healthPercent > 0.6 then
+		return HEALTH_BAR_SETTINGS.FillColors.High
+	elseif healthPercent > 0.3 then
+		return HEALTH_BAR_SETTINGS.FillColors.Medium
+	else
+		return HEALTH_BAR_SETTINGS.FillColors.Low
+	end
+end
+
+local function updateHealthBar(zombie, billboard, healthFill)
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	local healthPercent = humanoid.Health / humanoid.MaxHealth
+	local isDamaged = healthPercent < 1
+
+	-- Show bar if damaged
+	if isDamaged and not billboard.Enabled then
+		billboard.Enabled = true
+
+		-- Fade in
+		for _, obj in ipairs(billboard:GetDescendants()) do
+			if obj:IsA("GuiObject") then
+				TweenService:Create(obj, TweenInfo.new(HEALTH_BAR_SETTINGS.FadeInTime), {
+					BackgroundTransparency = obj:GetAttribute("OriginalTransparency") or obj.BackgroundTransparency
+				}):Play()
+			end
+		end
+	end
+
+	-- Update fill size
+	local targetSize = UDim2.new(healthPercent, -4, 1, -4)
+	TweenService:Create(healthFill, TweenInfo.new(0.2, Enum.EasingStyle.Quad), {
+		Size = targetSize
+	}):Play()
+
+	-- Update color
+	local targetColor = getHealthColor(healthPercent)
+	TweenService:Create(healthFill, TweenInfo.new(0.3), {
+		BackgroundColor3 = targetColor
+	}):Play()
+
+	-- Hide if at full health (with delay)
+	if healthPercent >= 1 and billboard.Enabled then
+		task.delay(HEALTH_BAR_SETTINGS.HideDelay, function()
+			if humanoid.Health >= humanoid.MaxHealth then
+				billboard.Enabled = false
+			end
+		end)
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       ZOMBIE MANAGEMENT
+-- ═══════════════════════════════════════════════════════════════
+
+local function setupZombie(zombie)
+	-- Wait a moment for zombie to be fully setup
+	task.wait(0.1)
+
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	-- Create health bar
+	local billboard, healthFill = createHealthBar(zombie)
+	if not billboard then return end
+
+	-- Store reference
+	activeHealthBars[zombie] = {
+		billboard = billboard,
+		healthFill = healthFill
+	}
+
+	-- Update on health change
+	humanoid.HealthChanged:Connect(function(health)
+		if health > 0 then
+			updateHealthBar(zombie, billboard, healthFill)
+		end
+	end)
+
+	-- Cleanup on death
+	humanoid.Died:Connect(function()
+		-- Fade out
+		TweenService:Create(billboard, TweenInfo.new(0.3), {
+			StudsOffset = HEALTH_BAR_SETTINGS.StudsOffset + Vector3.new(0, 1, 0)
+		}):Play()
+
+		for _, obj in ipairs(billboard:GetDescendants()) do
+			if obj:IsA("GuiObject") then
+				TweenService:Create(obj, TweenInfo.new(0.3), {
+					BackgroundTransparency = 1
+				}):Play()
+			end
+		end
+
+		task.wait(0.3)
+		billboard:Destroy()
+		activeHealthBars[zombie] = nil
+	end)
+
+	-- Set initial state (hidden, will show when damaged)
+	billboard.Enabled = false
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       DISTANCE-BASED VISIBILITY
+-- ═══════════════════════════════════════════════════════════════
+
+local function updateVisibility()
+	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+		return
+	end
+
+	local playerPos = player.Character.HumanoidRootPart.Position
+
+	for zombie, data in pairs(activeHealthBars) do
+		if zombie and zombie.Parent and zombie.PrimaryPart then
+			local distance = (zombie.PrimaryPart.Position - playerPos).Magnitude
+
+			-- Only show if within distance and damaged
+			local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+			if humanoid then
+				local isDamaged = humanoid.Health < humanoid.MaxHealth
+				data.billboard.Enabled = isDamaged and distance <= HEALTH_BAR_SETTINGS.ShowDistance
+			end
+		else
+			-- Zombie is gone, cleanup
+			if data.billboard then
+				data.billboard:Destroy()
+			end
+			activeHealthBars[zombie] = nil
+		end
+	end
+end
+
+-- Update visibility every 0.5 seconds (performance)
+task.spawn(function()
+	while true do
+		task.wait(0.5)
+		updateVisibility()
+	end
+end)
+
+-- ═══════════════════════════════════════════════════════════════
+--                       INITIALIZATION
+-- ═══════════════════════════════════════════════════════════════
+
+-- Setup existing zombies
+for _, zombie in ipairs(CollectionService:GetTagged("Enemy")) do
+	if zombie:IsA("Model") then
+		setupZombie(zombie)
+	end
+end
+
+-- Setup new zombies
+CollectionService:GetInstanceAddedSignal("Enemy"):Connect(function(zombie)
+	if zombie:IsA("Model") then
+		setupZombie(zombie)
+	end
+end)
+
+-- Cleanup removed zombies
+CollectionService:GetInstanceRemovedSignal("Enemy"):Connect(function(zombie)
+	if activeHealthBars[zombie] then
+		if activeHealthBars[zombie].billboard then
+			activeHealthBars[zombie].billboard:Destroy()
+		end
+		activeHealthBars[zombie] = nil
+	end
+end)
+
+print("✅ Zombie Health Bar System initialized")
