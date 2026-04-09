@@ -1,0 +1,223 @@
+-- 🏠 SAFE ZONE CONFIGURATION
+-- Defines all safe zones in the game with unlock requirements
+
+local SafeZoneConfig = {}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       SAFE ZONE SETTINGS
+-- ═══════════════════════════════════════════════════════════════
+
+SafeZoneConfig.Settings = {
+	-- Zombie behavior
+	ZombieDamagePerSecond = 15,        -- Damage zombies take in safe zone
+	ZombieCheckInterval = 0.5,          -- How often to check zombies (performance)
+
+	-- Player protection
+	PreventZombieTargeting = true,      -- Zombies can't target players in safe zone
+	ShowSafeZoneUI = true,              -- Show "SAFE ZONE" text when entering
+
+	-- Spawning
+	PreventZombieSpawning = true,       -- No zombies spawn in safe zones
+	SafeZoneSpawnBuffer = 20,           -- Extra studs around safe zone (no spawns)
+
+	-- Visual feedback
+	SafeZoneBorderColor = Color3.fromRGB(46, 204, 113),  -- Green
+	DangerZoneBorderColor = Color3.fromRGB(231, 76, 60), -- Red
+	BorderTransparency = 0.7,
+	ShowBorders = true,                 -- Visual border for safe zones
+}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       SAFE ZONE DEFINITIONS
+-- ═══════════════════════════════════════════════════════════════
+
+SafeZoneConfig.Zones = {
+
+	-- MAIN SAFEHOUSE (Always unlocked)
+	MainSafehouse = {
+		Name = "Main Safehouse",
+		PartName = "MainSafehouse",        -- Name of the part in workspace
+		IsUnlocked = true,                 -- Always available
+		UnlockRequirement = nil,           -- No requirement
+
+		-- Features
+		HasCraftingStation = true,
+		HasStorage = true,
+		HasSleeping = true,
+
+		-- Visual
+		ShowBorder = false,                -- No green border for starter zone
+
+		Description = "Your primary base of operations",
+	},
+
+	-- WATCHTOWER (Unlockable)
+	Watchtower = {
+		Name = "Watchtower",
+		PartName = "Watchtower",
+		IsUnlocked = false,                -- Locked by default
+		UnlockRequirement = {
+			Type = "Quest",                -- Can be: Quest, Item, Day, Kill
+			QuestID = "RepairWatchtower",  -- Quest to complete
+		},
+
+		HasCraftingStation = false,
+		HasStorage = true,
+		HasSleeping = false,
+
+		ShowBorder = true,                 -- Show green border
+
+		Description = "High vantage point with storage",
+	},
+
+	-- WAREHOUSE (Unlockable)
+	Warehouse = {
+		Name = "Warehouse",
+		PartName = "Warehouse",
+		IsUnlocked = false,
+		UnlockRequirement = {
+			Type = "Item",
+			ItemName = "WarehouseKey",
+			Quantity = 1,
+		},
+
+		HasCraftingStation = true,
+		HasStorage = true,
+		HasSleeping = false,
+
+		ShowBorder = true,                 -- Show green border
+
+		Description = "Large storage facility",
+	},
+
+	-- UNDERGROUND BUNKER (Unlockable - Late game)
+	Bunker = {
+		Name = "Underground Bunker",
+		PartName = "Bunker",
+		IsUnlocked = false,
+		UnlockRequirement = {
+			Type = "Day",
+			DayRequired = 10,              -- Unlock after Day 10
+		},
+
+		HasCraftingStation = true,
+		HasStorage = true,
+		HasSleeping = true,
+
+		ShowBorder = true,                 -- Show green border
+
+		Description = "Fortified underground shelter",
+	},
+
+}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       HELPER FUNCTIONS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Check if player is in any safe zone
+function SafeZoneConfig:IsPlayerInSafeZone(player)
+	if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+		return false, nil
+	end
+
+	local position = player.Character.HumanoidRootPart.Position
+	local safeZonesFolder = workspace:FindFirstChild("SafeZones")
+
+	if not safeZonesFolder then
+		warn("SafeZones folder not found in Workspace!")
+		return false, nil
+	end
+
+	for zoneID, zoneData in pairs(self.Zones) do
+		if zoneData.IsUnlocked then
+			local part = safeZonesFolder:FindFirstChild(zoneData.PartName)
+			if part and part:IsA("BasePart") then
+				if self:IsPositionInZone(position, part) then
+					return true, zoneID
+				end
+			end
+		end
+	end
+
+	return false, nil
+end
+
+-- Check if position is inside a safe zone part
+function SafeZoneConfig:IsPositionInZone(position, zonePart)
+	local relativePos = zonePart.CFrame:PointToObjectSpace(position)
+	local halfSize = zonePart.Size / 2
+
+	return math.abs(relativePos.X) <= halfSize.X and
+		math.abs(relativePos.Y) <= halfSize.Y and
+		math.abs(relativePos.Z) <= halfSize.Z
+end
+
+-- Check if zombie is in any safe zone
+function SafeZoneConfig:IsZombieInSafeZone(zombie)
+	if not zombie.PrimaryPart then return false end
+
+	local position = zombie.PrimaryPart.Position
+	local safeZonesFolder = workspace:FindFirstChild("SafeZones")
+
+	if not safeZonesFolder then return false end
+
+	for _, zoneData in pairs(self.Zones) do
+		if zoneData.IsUnlocked then
+			local part = safeZonesFolder:FindFirstChild(zoneData.PartName)
+			if part and part:IsA("BasePart") then
+				if self:IsPositionInZone(position, part) then
+					return true
+				end
+			end
+		end
+	end
+
+	return false
+end
+
+-- Check if position is valid for zombie spawning (not in/near safe zone)
+function SafeZoneConfig:IsValidSpawnPosition(position)
+	local safeZonesFolder = workspace:FindFirstChild("SafeZones")
+
+	if not safeZonesFolder then return true end
+
+	for _, zoneData in pairs(self.Zones) do
+		if zoneData.IsUnlocked then
+			local part = safeZonesFolder:FindFirstChild(zoneData.PartName)
+			if part and part:IsA("BasePart") then
+				-- Check if within safe zone + buffer
+				local distance = (position - part.Position).Magnitude
+				local maxDistance = (part.Size.Magnitude / 2) + self.Settings.SafeZoneSpawnBuffer
+
+				if distance < maxDistance then
+					return false -- Too close to safe zone
+				end
+			end
+		end
+	end
+
+	return true
+end
+
+-- Unlock a safe zone
+function SafeZoneConfig:UnlockZone(zoneID)
+	if self.Zones[zoneID] then
+		self.Zones[zoneID].IsUnlocked = true
+		return true
+	end
+	return false
+end
+
+-- Get all unlocked zones
+function SafeZoneConfig:GetUnlockedZones()
+	local unlocked = {}
+	for zoneID, zoneData in pairs(self.Zones) do
+		if zoneData.IsUnlocked then
+			table.insert(unlocked, {ID = zoneID, Data = zoneData})
+		end
+	end
+	return unlocked
+end
+
+return SafeZoneConfig
