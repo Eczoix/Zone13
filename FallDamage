@@ -1,19 +1,57 @@
--- FallDamageHandler (Script > ServerScriptService)
+-- FallDamage (LocalScript > StarterCharacterScripts)
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local fallDamageEvent = ReplicatedStorage:WaitForChild("GameRemotes"):WaitForChild("FallDamageEvent")
-fallDamageEvent.OnServerEvent:Connect(function(player, damage)
-	-- Sanity check the damage value so exploiters can't send 99999
-	if typeof(damage) ~= "number" then return end
-	damage = math.clamp(damage, 0, 100)
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
-	local character = player.Character
-	if not character then return end
+-- Config
+local MIN_FALL_DISTANCE = 10
+local DAMAGE_MULTIPLIER = 0.8
+local MAX_DAMAGE = 100
 
-	local humanoid = character:FindFirstChild("Humanoid")
-	if humanoid and humanoid.Health > 0 then
-		humanoid:TakeDamage(damage)
+local peakHeight = nil
+local isFalling = false
+
+RunService.Heartbeat:Connect(function()
+	if not humanoid or humanoid.Health <= 0 then return end
+
+	local floorMaterial = humanoid.FloorMaterial
+
+	if floorMaterial == Enum.Material.Air then
+		if not isFalling then
+			isFalling = true
+			peakHeight = rootPart.Position.Y
+		else
+			if rootPart.Position.Y > peakHeight then
+				peakHeight = rootPart.Position.Y
+			end
+		end
+	else
+		if isFalling and peakHeight then
+			local fallDistance = peakHeight - rootPart.Position.Y
+
+			if fallDistance >= MIN_FALL_DISTANCE then
+				local damage = math.floor((fallDistance - MIN_FALL_DISTANCE) * DAMAGE_MULTIPLIER)
+				damage = math.clamp(damage, 0, MAX_DAMAGE)
+
+				if damage > 0 then
+					fallDamageEvent:FireServer(damage)
+				end
+			end
+		end
+
+		isFalling = false
+		peakHeight = nil
 	end
+end)
+
+humanoid.Died:Connect(function()
+	isFalling = false
+	peakHeight = nil
 end)
