@@ -1,0 +1,404 @@
+--[[
+	CraftingServer_GlobalTiers.lua
+	Script - Place in ServerScriptService
+	
+	GLOBAL TIER SYSTEM: When one player unlocks a tier, ALL players unlock it!
+]]
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+
+local CraftingRecipes = require(ReplicatedStorage:WaitForChild("CraftingRecipes"))
+local CraftingConfig = require(ReplicatedStorage:WaitForChild("CraftingConfig"))
+
+print("🔨 [CRAFTING] Initializing with GLOBAL Tier System...")
+
+-- ===========================
+-- ITEM STORAGE SETUP
+-- ===========================
+
+local itemsFolder = ReplicatedStorage:FindFirstChild("CraftableItems")
+if not itemsFolder then
+	itemsFolder = Instance.new("Folder")
+	itemsFolder.Name = "CraftableItems"
+	itemsFolder.Parent = ReplicatedStorage
+end
+
+local toolsFolder = itemsFolder:FindFirstChild("Tools")
+if not toolsFolder then
+	toolsFolder = Instance.new("Folder")
+	toolsFolder.Name = "Tools"
+	toolsFolder.Parent = itemsFolder
+end
+
+local armorFolder = itemsFolder:FindFirstChild("Armor")
+if not armorFolder then
+	armorFolder = Instance.new("Folder")
+	armorFolder.Name = "Armor"
+	armorFolder.Parent = itemsFolder
+end
+
+local furnitureFolder = itemsFolder:FindFirstChild("Furniture")
+if not furnitureFolder then
+	furnitureFolder = Instance.new("Folder")
+	furnitureFolder.Name = "Furniture"
+	furnitureFolder.Parent = itemsFolder
+end
+
+-- ===========================
+-- GLOBAL TIER SYSTEM
+-- ===========================
+
+local GLOBAL_TIER = 1  -- ⭐ EVERYONE shares this tier!
+
+local TIER_UNLOCK_ITEMS = {
+	["Tier 2 Unlock"] = 2,
+	["Tier 3 Unlock"] = 3,
+}
+
+local function setGlobalTier(newTier, unlockedBy)
+	if newTier <= GLOBAL_TIER then
+		return false
+	end
+
+	GLOBAL_TIER = newTier
+	print("🌍 [CRAFTING] GLOBAL Tier unlocked to", newTier, "by", unlockedBy.Name)
+
+	-- Notify ALL players
+	local craftingRemotes = ReplicatedStorage:FindFirstChild("CraftingRemotes")
+	if craftingRemotes then
+		local tierUpdatedEvent = craftingRemotes:FindFirstChild("TierUpdated")
+		if tierUpdatedEvent then
+			for _, player in pairs(Players:GetPlayers()) do
+				tierUpdatedEvent:FireClient(player, GLOBAL_TIER)
+				print("  ✉️ [CRAFTING] Notified", player.Name, "of Tier", GLOBAL_TIER)
+			end
+		end
+	end
+
+	return true
+end
+
+-- ===========================
+-- BASKET API ACCESS
+-- ===========================
+
+local BasketAPI = nil
+task.spawn(function()
+	local maxAttempts = 20
+	local attempts = 0
+
+	while not _G.BasketAPI and attempts < maxAttempts do
+		task.wait(0.5)
+		attempts = attempts + 1
+	end
+
+	if _G.BasketAPI then
+		BasketAPI = _G.BasketAPI
+		print("✅ [CRAFTING] Connected to BasketAPI!")
+	else
+		warn("❌ [CRAFTING] BasketAPI not found! Make sure BasketSystemServer is running.")
+	end
+end)
+
+-- ===========================
+-- BASKET INTEGRATION
+-- ===========================
+
+local basketRemotes = ReplicatedStorage:WaitForChild("BasketRemotes", 10)
+if basketRemotes then
+	local basketInventoryUpdated = basketRemotes:FindFirstChild("BasketInventoryUpdated")
+
+	if basketInventoryUpdated then
+		basketInventoryUpdated.Event:Connect(function(player, newInventory)
+			print("📦 [CRAFTING] Basket updated for", player.Name)
+
+			-- Forward to crafting GUI
+			local craftingRemotes = ReplicatedStorage:FindFirstChild("CraftingRemotes")
+			if craftingRemotes then
+				local basketUpdatedEvent = craftingRemotes:FindFirstChild("BasketUpdated")
+				if basketUpdatedEvent then
+					basketUpdatedEvent:FireClient(player, newInventory)
+				end
+			end
+		end)
+		print("✅ [CRAFTING] Listening for basket updates!")
+	else
+		warn("⚠️ [CRAFTING] BasketInventoryUpdated not found")
+	end
+else
+	warn("⚠️ [CRAFTING] BasketRemotes not found - basket integration won't work!")
+end
+
+-- ===========================
+-- REMOTE EVENTS/FUNCTIONS
+-- ===========================
+
+local remotesFolder = Instance.new("Folder")
+remotesFolder.Name = "CraftingRemotes"
+remotesFolder.Parent = ReplicatedStorage
+
+local requestCraftEvent = Instance.new("RemoteEvent")
+requestCraftEvent.Name = "RequestCraft"
+requestCraftEvent.Parent = remotesFolder
+
+local getPlayerTierFunction = Instance.new("RemoteFunction")
+getPlayerTierFunction.Name = "GetPlayerTier"
+getPlayerTierFunction.Parent = remotesFolder
+
+local getBasketInventoryFunction = Instance.new("RemoteFunction")
+getBasketInventoryFunction.Name = "GetBasketInventory"
+getBasketInventoryFunction.Parent = remotesFolder
+
+local basketUpdatedEvent = Instance.new("RemoteEvent")
+basketUpdatedEvent.Name = "BasketUpdated"
+basketUpdatedEvent.Parent = remotesFolder
+
+local tierUpdatedEvent = Instance.new("RemoteEvent")
+tierUpdatedEvent.Name = "TierUpdated"
+tierUpdatedEvent.Parent = remotesFolder
+
+local craftResultEvent = Instance.new("RemoteEvent")
+craftResultEvent.Name = "CraftResult"
+craftResultEvent.Parent = remotesFolder
+
+-- ===========================
+-- REMOTE FUNCTION HANDLERS
+-- ===========================
+
+getPlayerTierFunction.OnServerInvoke = function(player)
+	return GLOBAL_TIER  -- ⭐ Return the global tier for everyone!
+end
+
+getBasketInventoryFunction.OnServerInvoke = function(player)
+	if BasketAPI then
+		local inventory = BasketAPI.GetInventory()
+		return inventory
+	else
+		return {}
+	end
+end
+
+-- ===========================
+-- ITEM DETECTION
+-- ===========================
+
+local function findItemInCategory(itemName)
+	local folders = {
+		{folder = toolsFolder, category = "Tools"},
+		{folder = armorFolder, category = "Armor"},
+		{folder = furnitureFolder, category = "Furniture"}
+	}
+
+	for _, info in ipairs(folders) do
+		local item = info.folder:FindFirstChild(itemName)
+		if item then
+			return item, info.category
+		end
+	end
+
+	return nil, nil
+end
+
+-- ===========================
+-- ITEM GIVING FUNCTIONS
+-- ===========================
+
+local function giveTool(player, tool, itemName)
+	local backpackClone = tool:Clone()
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		backpackClone.Parent = backpack
+		print("✅ [CRAFTING] Gave", itemName, "to", player.Name, "'s Backpack")
+	end
+
+	local starterGearClone = tool:Clone()
+	local starterGear = player:FindFirstChild("StarterGear")
+	if not starterGear then
+		starterGear = Instance.new("Folder")
+		starterGear.Name = "StarterGear"
+		starterGear.Parent = player
+	end
+	starterGearClone.Parent = starterGear
+	print("✅ [CRAFTING] Added", itemName, "to", player.Name, "'s StarterGear")
+
+	return true
+end
+
+local function giveArmor(player, armor, itemName)
+	local character = player.Character
+	if not character then return false end
+
+	local humanoid = character:FindFirstChild("Humanoid")
+	if not humanoid then return false end
+
+	local armorClone = armor:Clone()
+
+	if armorClone:IsA("Accessory") then
+		humanoid:AddAccessory(armorClone)
+		return true
+	end
+
+	if armorClone:IsA("Tool") then
+		return giveTool(player, armor, itemName)
+	end
+
+	if armorClone:IsA("Model") then
+		for _, part in ipairs(armorClone:GetDescendants()) do
+			if part:IsA("BasePart") then
+				part.Parent = character
+				local bodyPart = character:FindFirstChild(part.Name) or character:FindFirstChild("HumanoidRootPart")
+				if bodyPart and bodyPart:IsA("BasePart") then
+					local weld = Instance.new("WeldConstraint")
+					weld.Part0 = bodyPart
+					weld.Part1 = part
+					weld.Parent = part
+				end
+			end
+		end
+
+		local recipe = CraftingRecipes[itemName]
+		if recipe and recipe.armorStats then
+			if recipe.armorStats.MaxHealth then
+				humanoid.MaxHealth = humanoid.MaxHealth + recipe.armorStats.MaxHealth
+				humanoid.Health = humanoid.MaxHealth
+			end
+		end
+		return true
+	end
+
+	return false
+end
+
+local function giveFurniture(player, furniture, itemName)
+	print("🏠 [CRAFTING] Furniture not yet implemented:", itemName)
+	return true
+end
+
+local function giveItemToPlayer(player, itemName, category)
+	local item, foundCategory = findItemInCategory(itemName)
+
+	if not item then
+		warn("❌ [CRAFTING] Item not found:", itemName)
+		return false
+	end
+
+	category = foundCategory or category
+
+	if category == "Tools" then
+		if item:IsA("Tool") then
+			return giveTool(player, item, itemName)
+		end
+	elseif category == "Armor" then
+		return giveArmor(player, item, itemName)
+	elseif category == "Furniture" then
+		return giveFurniture(player, item, itemName)
+	end
+
+	return false
+end
+
+-- ===========================
+-- CRAFTING LOGIC
+-- ===========================
+
+local currentlyCrafting = {}
+
+requestCraftEvent.OnServerEvent:Connect(function(player, recipeName)
+	if currentlyCrafting[player.UserId] then
+		craftResultEvent:FireClient(player, false, "⏳ Already crafting something!")
+		return
+	end
+
+	local recipe = CraftingRecipes[recipeName]
+	if not recipe then
+		craftResultEvent:FireClient(player, false, "❌ Invalid recipe!")
+		return
+	end
+
+	-- ⭐ Check against GLOBAL tier
+	if recipe.tier > GLOBAL_TIER then
+		craftResultEvent:FireClient(player, false, "🔒 Recipe is locked!")
+		return
+	end
+
+	if not BasketAPI then
+		craftResultEvent:FireClient(player, false, "❌ Basket system not ready!")
+		return
+	end
+
+	local hasMaterials, missingItem = BasketAPI.HasMaterials(recipe.requirements)
+	if not hasMaterials then
+		craftResultEvent:FireClient(player, false, "❌ Not enough " .. missingItem .. "!")
+		return
+	end
+
+	currentlyCrafting[player.UserId] = true
+
+	local removeSuccess = BasketAPI.RemoveItems(recipe.requirements)
+	if not removeSuccess then
+		currentlyCrafting[player.UserId] = nil
+		craftResultEvent:FireClient(player, false, "❌ Failed to remove materials!")
+		return
+	end
+
+	print(string.format("⏳ [CRAFTING] %s is crafting %s...", player.Name, recipeName))
+
+	task.wait(recipe.craftTime or CraftingConfig.DEFAULT_CRAFT_TIME)
+
+	currentlyCrafting[player.UserId] = nil
+
+	-- ⭐ CHECK IF THIS IS A TIER UNLOCK ITEM
+	local unlockTierNumber = TIER_UNLOCK_ITEMS[recipeName]
+	if unlockTierNumber then
+		-- This is a tier unlock item!
+		local success = setGlobalTier(unlockTierNumber, player)
+		if success then
+			craftResultEvent:FireClient(player, true, "🌍 Unlocked Tier " .. unlockTierNumber .. " for EVERYONE!")
+			print(string.format("✅ [CRAFTING] %s unlocked Tier %d for all players!", player.Name, unlockTierNumber))
+		else
+			craftResultEvent:FireClient(player, false, "❌ Already at this tier or higher!")
+			-- Refund materials
+			for material, amount in pairs(recipe.requirements) do
+				BasketAPI.AddItem(material, amount)
+			end
+		end
+		return
+	end
+
+	-- Normal item crafting
+	local success = giveItemToPlayer(player, recipeName, recipe.category)
+
+	if success then
+		craftResultEvent:FireClient(player, true, "✅ Crafted " .. recipeName .. "!")
+		print(string.format("✅ [CRAFTING] %s crafted %s!", player.Name, recipeName))
+	else
+		for material, amount in pairs(recipe.requirements) do
+			BasketAPI.AddItem(material, amount)
+		end
+		craftResultEvent:FireClient(player, false, "❌ Failed to give item! Materials refunded.")
+	end
+end)
+
+-- ===========================
+-- NEW PLAYER JOIN
+-- ===========================
+
+Players.PlayerAdded:Connect(function(player)
+	-- Wait a bit for client to load
+	task.wait(2)
+
+	-- Send current global tier to new player
+	local craftingRemotes = ReplicatedStorage:FindFirstChild("CraftingRemotes")
+	if craftingRemotes then
+		local tierUpdatedEvent = craftingRemotes:FindFirstChild("TierUpdated")
+		if tierUpdatedEvent then
+			tierUpdatedEvent:FireClient(player, GLOBAL_TIER)
+			print("📬 [CRAFTING] Sent current tier", GLOBAL_TIER, "to", player.Name)
+		end
+	end
+end)
+
+print("✅ [CRAFTING] Server loaded with GLOBAL Tier System!")
+print("🌍 [CRAFTING] Current Global Tier:", GLOBAL_TIER)
+print("🔓 [CRAFTING] When one player unlocks, ALL players unlock!")
