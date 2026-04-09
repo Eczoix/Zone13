@@ -1,3 +1,8 @@
+-- ==========================================
+-- IMPROVED SACK SYSTEM - SERVER SCRIPT
+-- Place in ServerScriptService
+-- Name: SackSystemServer
+-- ==========================================
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,8 +13,8 @@ local RunService = game:GetService("RunService")
 print("[SACK] Loading Sack System Server...")
 
 -- Configuration
-local SACK_CAPACITY = 15
-local COLLECTION_RANGE = 15
+local SACK_CAPACITY = 20
+local COLLECTION_RANGE = 18
 
 -- Create RemoteEvents folder
 local remoteFolder = ReplicatedStorage:FindFirstChild("SackRemotes")
