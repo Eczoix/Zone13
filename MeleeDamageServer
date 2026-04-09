@@ -1,0 +1,104 @@
+-- 🔴 SERVER-SIDE DAMAGE HANDLER
+-- Validates and applies damage from melee weapons
+-- UPDATED: Only damages enemies tagged with "Enemy" (zombies/NPCs), not players
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local CollectionService = game:GetService("CollectionService")
+
+-- Modules
+local SpecialEffects = require(ReplicatedStorage:WaitForChild("SpecialEffects"))
+
+-- Remote event
+local damageEvent = ReplicatedStorage:FindFirstChild("MeleeDamageEvent")
+if not damageEvent then
+	damageEvent = Instance.new("RemoteEvent")
+	damageEvent.Name = "MeleeDamageEvent"
+	damageEvent.Parent = ReplicatedStorage
+end
+
+-- Visual hit feedback
+local function createHitEffect(position)
+	local effect = Instance.new("Part")
+	effect.Size = Vector3.new(2, 2, 2)
+	effect.Shape = Enum.PartType.Ball
+	effect.Material = Enum.Material.Neon
+	effect.Color = Color3.fromRGB(255, 50, 50)
+	effect.Anchored = true
+	effect.CanCollide = false
+	effect.Transparency = 0.5
+	effect.Position = position
+	effect.Parent = workspace
+
+	-- Expand and fade
+	local tween = game:GetService("TweenService"):Create(effect, TweenInfo.new(0.3), {
+		Size = Vector3.new(4, 4, 4),
+		Transparency = 1
+	})
+	tween:Play()
+
+	game:GetService("Debris"):AddItem(effect, 0.5)
+end
+
+-- Validate target is an enemy (not a player)
+local function isValidEnemy(targetChar)
+	-- Must be a Model
+	if not targetChar or not targetChar:IsA("Model") then
+		return false
+	end
+
+	-- Must NOT be a player character
+	local isPlayer = Players:GetPlayerFromCharacter(targetChar) ~= nil
+	if isPlayer then
+		return false
+	end
+
+	-- Must be tagged as "Enemy"
+	local hasEnemyTag = CollectionService:HasTag(targetChar, "Enemy")
+	if not hasEnemyTag then
+		return false
+	end
+
+	return true
+end
+
+-- Handle damage requests
+damageEvent.OnServerEvent:Connect(function(player, hitCharacters, damage, specialEffect)
+	-- Validate request
+	if not player or not hitCharacters or not damage then 
+		warn("Invalid damage request")
+		return 
+	end
+
+	local playerCharacter = player.Character
+	if not playerCharacter then return end
+
+	-- Apply damage to all hit characters
+	for _, targetChar in pairs(hitCharacters) do
+		-- Validate target is a legitimate enemy
+		if isValidEnemy(targetChar) then
+			local humanoid = targetChar:FindFirstChildOfClass("Humanoid")
+			local rootPart = targetChar:FindFirstChild("HumanoidRootPart")
+
+			if humanoid and humanoid.Health > 0 and rootPart then
+				-- Apply damage
+				humanoid:TakeDamage(damage)
+
+				-- Visual feedback
+				createHitEffect(rootPart.Position)
+
+				-- Apply special effect if exists
+				if specialEffect then
+					SpecialEffects:ApplyEffect(targetChar, specialEffect)
+				end
+
+				print(player.Name .. " dealt " .. damage .. " damage to " .. targetChar.Name)
+			end
+		else
+			-- Attempted to damage non-enemy (security check)
+			warn("Player " .. player.Name .. " tried to damage invalid target: " .. tostring(targetChar))
+		end
+	end
+end)
+
+print("✅ Melee Damage Server loaded! (Zombie mode - only damages enemies tagged 'Enemy')")
