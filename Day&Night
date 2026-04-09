@@ -21,66 +21,62 @@ local TimeManager = {
 	-- POST-APOCALYPTIC DAY LIGHTING (Harsh, desolate, washed out)
 	dayLighting = {
 		Brightness = 0.8,
-		ColorShift_Top = Color3.fromRGB(255, 220, 180), -- Dusty orange sky
-		ColorShift_Bottom = Color3.fromRGB(180, 140, 100), -- Brown/tan horizon
-		Ambient = Color3.fromRGB(90, 85, 75), -- Muted browns
-		OutdoorAmbient = Color3.fromRGB(110, 95, 80), -- Dusty ambient
+		ColorShift_Top = Color3.fromRGB(255, 220, 180),
+		ColorShift_Bottom = Color3.fromRGB(180, 140, 100),
+		Ambient = Color3.fromRGB(90, 85, 75),
+		OutdoorAmbient = Color3.fromRGB(110, 95, 80),
 		ShadowSoftness = 0.5,
-		ExposureCompensation = -0.3,
-		ClockTime = 14.5
+		ExposureCompensation = -0.3
 	},
 
-	-- HORROR NIGHT LIGHTING (Dark, ominous, barely visible)
+	-- NIGHT LIGHTING (Dark with visibility, flashlight-friendly)
 	nightLighting = {
-		Brightness = 0.02, -- VERY dark
-		ColorShift_Top = Color3.fromRGB(10, 12, 20), -- Almost black with blue tint
-		ColorShift_Bottom = Color3.fromRGB(5, 5, 8), -- Near black
-		Ambient = Color3.fromRGB(8, 8, 12), -- Minimal ambient
-		OutdoorAmbient = Color3.fromRGB(12, 14, 20), -- Slight blue moonlight
-		ShadowSoftness = 1,
-		ExposureCompensation = -3.5,
-		ClockTime = 3
+		Brightness = 2, -- High brightness so flashlights work properly
+		ColorShift_Top = Color3.fromRGB(25, 30, 45), -- Dark blue sky
+		ColorShift_Bottom = Color3.fromRGB(15, 20, 30), -- Darker horizon
+		Ambient = Color3.fromRGB(20, 25, 35), -- Low ambient for darkness
+		OutdoorAmbient = Color3.fromRGB(30, 35, 50), -- Minimal moonlight
+		ShadowSoftness = 0.2, -- Sharp shadows for flashlight contrast
+		ExposureCompensation = 0 -- No exposure changes (keeps flashlight bright)
 	},
 
 	-- DAWN LIGHTING (Eerie transition, red sky warning)
 	dawnLighting = {
 		Brightness = 0.3,
-		ColorShift_Top = Color3.fromRGB(180, 90, 60), -- Blood red dawn
-		ColorShift_Bottom = Color3.fromRGB(120, 60, 40), -- Dark orange
+		ColorShift_Top = Color3.fromRGB(180, 90, 60),
+		ColorShift_Bottom = Color3.fromRGB(120, 60, 40),
 		Ambient = Color3.fromRGB(50, 40, 35),
 		OutdoorAmbient = Color3.fromRGB(70, 50, 40),
 		ShadowSoftness = 0.8,
-		ExposureCompensation = -1,
-		ClockTime = 6.5
+		ExposureCompensation = -1
 	},
 
 	-- DUSK LIGHTING (Final moments before darkness)
 	duskLighting = {
 		Brightness = 0.25,
-		ColorShift_Top = Color3.fromRGB(140, 80, 100), -- Purple/red sunset
-		ColorShift_Bottom = Color3.fromRGB(80, 40, 50), -- Dark crimson
+		ColorShift_Top = Color3.fromRGB(140, 80, 100),
+		ColorShift_Bottom = Color3.fromRGB(80, 40, 50),
 		Ambient = Color3.fromRGB(40, 35, 45),
 		OutdoorAmbient = Color3.fromRGB(55, 45, 55),
 		ShadowSoftness = 0.9,
-		ExposureCompensation = -1.5,
-		ClockTime = 18.5
+		ExposureCompensation = -1.5
 	},
 
 	-- ATMOSPHERE SETTINGS
 	dayAtmosphere = {
-		Color = Color3.fromRGB(180, 160, 120), -- Dusty yellow
-		Decay = Color3.fromRGB(150, 110, 70), -- Orange decay
+		Color = Color3.fromRGB(180, 160, 120),
+		Decay = Color3.fromRGB(150, 110, 70),
 		Glare = 0.8,
-		Haze = 4, -- Heavy dust in air
-		Density = 0.45 -- Thick atmosphere
+		Haze = 4,
+		Density = 0.45
 	},
 
 	nightAtmosphere = {
-		Color = Color3.fromRGB(40, 45, 60), -- Dark blue
-		Decay = Color3.fromRGB(10, 10, 10), -- Almost no decay
+		Color = Color3.fromRGB(40, 45, 60),
+		Decay = Color3.fromRGB(10, 10, 10),
 		Glare = 0,
-		Haze = 10, -- Very limited visibility
-		Density = 0.6 -- Thick, oppressive
+		Haze = 10,
+		Density = 0.6
 	},
 
 	-- POST-PROCESSING EFFECTS
@@ -93,7 +89,7 @@ local TimeManager = {
 	},
 
 	nightEffects = {
-		bloomIntensity = 0.8, -- Glowing eyes, lights pop
+		bloomIntensity = 0.8,
 		bloomSize = 48,
 		bloomThreshold = 0.8,
 		sunRaysIntensity = 0,
@@ -103,7 +99,7 @@ local TimeManager = {
 
 -- Initialize professional lighting setup
 function TimeManager:InitializeLighting()
-	-- Apply day lighting first
+	-- Start with day lighting
 	for property, value in pairs(self.dayLighting) do
 		pcall(function()
 			Lighting[property] = value
@@ -117,8 +113,8 @@ function TimeManager:InitializeLighting()
 		atmosphere[property] = value
 	end
 
-	-- FOG SETTINGS (Critical for atmosphere)
-	Lighting.FogColor = Color3.fromRGB(150, 130, 100) -- Dusty fog
+	-- FOG SETTINGS
+	Lighting.FogColor = Color3.fromRGB(150, 130, 100)
 	Lighting.FogStart = 50
 	Lighting.FogEnd = 350
 
@@ -129,21 +125,21 @@ function TimeManager:InitializeLighting()
 	bloom.Threshold = self.dayEffects.bloomThreshold
 	bloom.Parent = Lighting
 
-	-- POST-PROCESSING: Sun rays (day only)
+	-- POST-PROCESSING: Sun rays
 	local sunRays = Lighting:FindFirstChild("SunRays") or Instance.new("SunRaysEffect")
 	sunRays.Intensity = self.dayEffects.sunRaysIntensity
 	sunRays.Spread = self.dayEffects.sunRaysSpread
 	sunRays.Parent = Lighting
 
-	-- POST-PROCESSING: Color correction for post-apocalyptic feel
+	-- POST-PROCESSING: Color correction
 	local colorCorrection = Lighting:FindFirstChild("ColorCorrection") or Instance.new("ColorCorrectionEffect")
 	colorCorrection.Brightness = -0.05
 	colorCorrection.Contrast = 0.2
-	colorCorrection.Saturation = -0.3 -- Desaturated, dead world
-	colorCorrection.TintColor = Color3.fromRGB(255, 245, 230) -- Slight sepia
+	colorCorrection.Saturation = -0.3
+	colorCorrection.TintColor = Color3.fromRGB(255, 245, 230)
 	colorCorrection.Parent = Lighting
 
-	-- POST-PROCESSING: Depth of field for cinematic feel
+	-- POST-PROCESSING: Depth of field
 	local depthOfField = Lighting:FindFirstChild("DepthOfField") or Instance.new("DepthOfFieldEffect")
 	depthOfField.FarIntensity = 0.3
 	depthOfField.FocusDistance = 50
@@ -154,7 +150,7 @@ function TimeManager:InitializeLighting()
 	print("[TimeManager] Professional lighting system initialized")
 end
 
--- Check if weather system is active (don't override weather effects)
+-- Check if weather system is active
 function TimeManager:IsWeatherActive()
 	local currentWeather = GlobalState.currentWeather
 	return currentWeather ~= "Clear"
@@ -165,7 +161,6 @@ function TimeManager:TransitionLighting(isNight)
 	-- DON'T override lighting if weather is active
 	if self:IsWeatherActive() then
 		print("[TimeManager] Weather active - skipping lighting override")
-		-- Still update zombie spawn
 		game.ReplicatedStorage:SetAttribute("IsNight", isNight)
 		return
 	end
@@ -237,9 +232,9 @@ function TimeManager:ApplyLightingTransition(targetLighting, targetAtmosphere, t
 
 	-- Tween fog for visibility changes
 	local fogTween = TweenService:Create(Lighting, tweenInfo, {
-		FogColor = isNight and Color3.fromRGB(20, 20, 30) or Color3.fromRGB(150, 130, 100),
-		FogStart = isNight and 10 or 50, -- VERY close fog at night
-		FogEnd = isNight and 150 or 350 -- Limited visibility for horror
+		FogColor = isNight and Color3.fromRGB(10, 15, 25) or Color3.fromRGB(150, 130, 100),
+		FogStart = isNight and 100 or 50, -- Fog starts farther away at night
+		FogEnd = isNight and 500 or 350 -- Good visibility range at night
 	})
 	fogTween:Play()
 
@@ -264,9 +259,9 @@ function TimeManager:ApplyLightingTransition(targetLighting, targetAtmosphere, t
 	-- Color correction for night vision feel
 	if Lighting:FindFirstChild("ColorCorrection") then
 		local ccTween = TweenService:Create(Lighting.ColorCorrection, tweenInfo, {
-			Brightness = isNight and -0.2 or -0.05,
-			Contrast = isNight and 0.4 or 0.2,
-			Saturation = isNight and -0.5 or -0.3,
+			Brightness = isNight and 0 or -0.05, -- No darkness reduction at night
+			Contrast = isNight and 0.3 or 0.2,
+			Saturation = isNight and -0.3 or -0.3, -- Less desaturation
 			TintColor = isNight and Color3.fromRGB(200, 210, 255) or Color3.fromRGB(255, 245, 230)
 		})
 		ccTween:Play()
@@ -307,7 +302,6 @@ function TimeManager:Update()
 			task.wait(3)
 
 			task.spawn(function()
-				-- Get max zombies for new day
 				local ZombieConfig = require(ReplicatedStorage:WaitForChild("ZombieConfig"))
 				local maxZombies = ZombieConfig:GetMaxZombiesForDay(GlobalState.currentDay)
 				_G.SendNotificationToAll("DayStart", GlobalState.currentDay, maxZombies)
@@ -330,7 +324,7 @@ function TimeManager:Update()
 			timeOfDay = GlobalState:GetTimeOfDay(),
 			timeRemaining = math.floor(GlobalState:GetTimeRemaining()),
 			currentDay = GlobalState.currentDay,
-			cycleProgress = GlobalState:GetVisualProgress()  -- Use visual progress for the bar
+			cycleProgress = GlobalState:GetVisualProgress()
 		}
 
 		timeUpdateRemote:FireAllClients(gameState)
@@ -353,8 +347,32 @@ end)
 -- Initialize and start the system
 TimeManager:InitializeLighting()
 
--- Main update loop (runs every second)
-RunService.Heartbeat:Connect(function()
+-- NEW DAY/NIGHT CYCLE SYSTEM
+local DAY_LENGTH = 5 * 60 -- 5 minutes in seconds
+local MINUTES_IN_DAY = 24 * 60
+local START_HOUR = 7 -- Start at 12 PM (noon)
+
+-- Calculate starting offset so we begin at 12 PM
+-- 12 PM = 720 minutes = 50% through a 24-hour day
+local startProgress = (START_HOUR * 60) / MINUTES_IN_DAY -- 0.5 for noon
+GlobalState.gameStartTime = tick() - (startProgress * DAY_LENGTH)
+GlobalState.DAY_LENGTH = DAY_LENGTH
+
+-- Set initial ClockTime to noon
+Lighting:SetMinutesAfterMidnight(START_HOUR * 60)
+TimeManager.lastNightState = false
+
+-- Main update loop
+RunService.Heartbeat:Connect(function(deltaTime)
+	-- Calculate cycle progress (0 to 1)
+	local elapsed = (tick() - GlobalState.gameStartTime) % DAY_LENGTH
+	local progress = elapsed / DAY_LENGTH
+
+	-- Update Lighting ClockTime for sun movement
+	local gameMinutes = progress * MINUTES_IN_DAY
+	Lighting:SetMinutesAfterMidnight(gameMinutes)
+
+	-- Update game state logic
 	TimeManager:Update()
 end)
 
