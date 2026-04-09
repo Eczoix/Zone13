@@ -1,0 +1,287 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+
+local player = Players.LocalPlayer
+local remotes = ReplicatedStorage:WaitForChild("GameRemotes")
+
+local isSprinting = false
+
+-- Function to setup the HUD
+local function setupHUD()
+	-- Check if HUD already exists (prevents duplicates on respawn)
+	local existing = player:FindFirstChild("PlayerGui"):FindFirstChild("SurvivalHUD")
+	if existing then
+		existing:Destroy()
+	end
+
+	-- Create ScreenGui
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "SurvivalHUD"
+	gui.IgnoreGuiInset = true
+	gui.ResetOnSpawn = false
+	gui.Parent = player:WaitForChild("PlayerGui")
+
+	-- Main container (matching weather HUD style - SLIGHTLY BIGGER)
+	local mainFrame = Instance.new("Frame")
+	mainFrame.Name = "SurvivalContainer"
+	mainFrame.Size = UDim2.new(0.24, 0, 0.14, 0) -- Increased from 0.2 width and 0.12 height
+	mainFrame.Position = UDim2.new(0.02, 0, 0.86, 0) -- Bottom left
+	mainFrame.AnchorPoint = Vector2.new(0, 0)
+	mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+	mainFrame.BackgroundTransparency = 0.15
+	mainFrame.BorderSizePixel = 0
+	mainFrame.Parent = gui
+
+	-- Aspect ratio to maintain proportions (adjusted for longer shape)
+	local aspectRatio = Instance.new("UIAspectRatioConstraint")
+	aspectRatio.AspectRatio = 3.7 -- Slightly longer (was 3.5)
+	aspectRatio.Parent = mainFrame
+
+	-- Glassmorphism corner
+	local mainCorner = Instance.new("UICorner")
+	mainCorner.CornerRadius = UDim.new(0.18, 0)
+	mainCorner.Parent = mainFrame
+
+	-- Gradient overlay (matching weather HUD)
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 25, 35)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 15))
+	}
+	gradient.Rotation = 45
+	gradient.Parent = mainFrame
+
+	-- Inner glow effect
+	local innerGlow = Instance.new("Frame")
+	innerGlow.Name = "InnerGlow"
+	innerGlow.Size = UDim2.new(1, -4, 1, -4)
+	innerGlow.Position = UDim2.new(0, 2, 0, 2)
+	innerGlow.BackgroundTransparency = 1
+	innerGlow.BorderSizePixel = 0
+	innerGlow.Parent = mainFrame
+
+	local glowStroke = Instance.new("UIStroke")
+	glowStroke.Color = Color3.fromRGB(255, 255, 255)
+	glowStroke.Transparency = 0.85
+	glowStroke.Thickness = 1
+	glowStroke.Parent = innerGlow
+
+	local glowCorner = Instance.new("UICorner")
+	glowCorner.CornerRadius = UDim.new(0.16, 0)
+	glowCorner.Parent = innerGlow
+
+	-- Content frame
+	local contentFrame = Instance.new("Frame")
+	contentFrame.Size = UDim2.new(0.94, 0, 0.8, 0)
+	contentFrame.Position = UDim2.new(0.03, 0, 0.1, 0)
+	contentFrame.BackgroundTransparency = 1
+	contentFrame.Parent = mainFrame
+
+	-- Function to create a compact stat bar
+	local function createStatBar(name, yPos, color, emoji)
+		local barContainer = Instance.new("Frame")
+		barContainer.Size = UDim2.new(1, 0, 0.28, 0)
+		barContainer.Position = UDim2.new(0, 0, yPos, 0)
+		barContainer.BackgroundTransparency = 1
+		barContainer.Parent = contentFrame
+
+		-- Icon
+		local icon = Instance.new("TextLabel")
+		icon.Size = UDim2.new(0.15, 0, 1, 0)
+		icon.Position = UDim2.new(0, 0, 0, 0)
+		icon.BackgroundTransparency = 1
+		icon.Text = emoji
+		icon.TextScaled = true
+		icon.Font = Enum.Font.GothamBold
+		icon.TextColor3 = Color3.fromRGB(255, 255, 255)
+		icon.Parent = barContainer
+
+		local iconConstraint = Instance.new("UITextSizeConstraint")
+		iconConstraint.MaxTextSize = 18
+		iconConstraint.MinTextSize = 8
+		iconConstraint.Parent = icon
+
+		-- Bar background
+		local barBg = Instance.new("Frame")
+		barBg.Size = UDim2.new(0.8, 0, 0.7, 0)
+		barBg.Position = UDim2.new(0.18, 0, 0.15, 0)
+		barBg.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+		barBg.BorderSizePixel = 0
+		barBg.Parent = barContainer
+
+		local barBgCorner = Instance.new("UICorner")
+		barBgCorner.CornerRadius = UDim.new(0.5, 0)
+		barBgCorner.Parent = barBg
+
+		-- Bar fill
+		local barFill = Instance.new("Frame")
+		barFill.Name = "Fill"
+		barFill.Size = UDim2.new(1, 0, 1, 0)
+		barFill.Position = UDim2.new(0, 0, 0, 0)
+		barFill.BackgroundColor3 = color
+		barFill.BorderSizePixel = 0
+		barFill.Parent = barBg
+
+		local barFillCorner = Instance.new("UICorner")
+		barFillCorner.CornerRadius = UDim.new(0.5, 0)
+		barFillCorner.Parent = barFill
+
+		-- Glow effect on fill
+		local fillGlow = Instance.new("Frame")
+		fillGlow.Size = UDim2.new(1, 4, 1, 4)
+		fillGlow.Position = UDim2.new(0, -2, 0, -2)
+		fillGlow.BackgroundTransparency = 1
+		fillGlow.Parent = barFill
+
+		local fillStroke = Instance.new("UIStroke")
+		fillStroke.Color = color
+		fillStroke.Transparency = 0.7
+		fillStroke.Thickness = 2
+		fillStroke.Parent = fillGlow
+
+		local fillGlowCorner = Instance.new("UICorner")
+		fillGlowCorner.CornerRadius = UDim.new(0.5, 0)
+		fillGlowCorner.Parent = fillGlow
+
+		-- Update function
+		local function updateBar(current, max)
+			local percent = math.clamp(current / max, 0, 1)
+			local targetColor = color
+
+			-- Color changes based on percentage
+			if name == "Health" then
+				if percent <= 0.3 then
+					targetColor = Color3.fromRGB(180, 30, 30) -- Darker red when low
+				else
+					targetColor = Color3.fromRGB(231, 76, 60) -- Bright red (normal)
+				end
+			elseif name == "Hunger" then
+				targetColor = Color3.fromRGB(
+					math.floor(255 * (1 - percent)),
+					math.floor(200 * percent),
+					0
+				)
+			elseif name == "Stamina" then
+				targetColor = Color3.fromRGB(100, 149, 237) -- Blue
+			end
+
+			-- Warning pulse for low values
+			if percent <= 0.2 then
+				spawn(function()
+					for i = 1, 3 do
+						TweenService:Create(icon, TweenInfo.new(0.3), {TextTransparency = 0.5}):Play()
+						wait(0.3)
+						TweenService:Create(icon, TweenInfo.new(0.3), {TextTransparency = 0}):Play()
+						wait(0.3)
+					end
+				end)
+			end
+
+			-- Animate bar
+			TweenService:Create(barFill, TweenInfo.new(0.5, Enum.EasingStyle.Quad), {
+				Size = UDim2.new(percent, 0, 1, 0),
+				BackgroundColor3 = targetColor
+			}):Play()
+
+			TweenService:Create(fillStroke, TweenInfo.new(0.5), {
+				Color = targetColor
+			}):Play()
+		end
+
+		return updateBar
+	end
+
+	-- Create the three stat bars
+	local updateHealth = createStatBar("Health", 0.05, Color3.fromRGB(231, 76, 60), "❤️")  -- Bright red
+	local updateHunger = createStatBar("Hunger", 0.38, Color3.fromRGB(255, 180, 0), "🍗")
+	local updateStamina = createStatBar("Stamina", 0.71, Color3.fromRGB(100, 149, 237), "⚡")
+
+	-- Create mobile sprint button (matching reference design - simple text button)
+	local sprintButton = Instance.new("TextButton")
+	sprintButton.Name = "SprintButton"
+	sprintButton.Size = UDim2.new(0, 50, 0, 50) -- Same size as walking button in reference
+	sprintButton.Position = UDim2.new(1, -145, 1, -55) -- Moved higher and to the left
+	sprintButton.AnchorPoint = Vector2.new(0.5, 0.5)
+	sprintButton.BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+	sprintButton.BackgroundTransparency = 0.2
+	sprintButton.BorderSizePixel = 0
+	sprintButton.Text = "SPRINT"
+	sprintButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+	sprintButton.TextSize = 11
+	sprintButton.Font = Enum.Font.GothamBold
+	sprintButton.Parent = gui
+
+	local sprintCorner = Instance.new("UICorner")
+	sprintCorner.CornerRadius = UDim.new(0.25, 0)
+	sprintCorner.Parent = sprintButton
+
+	-- Hide sprint button on PC
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then
+		sprintButton.Visible = true
+	else
+		sprintButton.Visible = false
+	end
+
+	-- Sprint functions
+	local function startSprint()
+		if not isSprinting then
+			isSprinting = true
+			remotes.StartSprint:FireServer()
+
+			-- Visual feedback
+			TweenService:Create(sprintButton, TweenInfo.new(0.2), {
+				BackgroundColor3 = Color3.fromRGB(100, 200, 100)
+			}):Play()
+		end
+	end
+
+	local function stopSprint()
+		if isSprinting then
+			isSprinting = false
+			remotes.StopSprint:FireServer()
+
+			-- Visual feedback
+			TweenService:Create(sprintButton, TweenInfo.new(0.2), {
+				BackgroundColor3 = Color3.fromRGB(50, 50, 55)
+			}):Play()
+		end
+	end
+
+	-- Mobile sprint input
+	sprintButton.MouseButton1Down:Connect(startSprint)
+	sprintButton.MouseButton1Up:Connect(stopSprint)
+	sprintButton.MouseLeave:Connect(stopSprint)
+
+	-- PC sprint input (Left Shift)
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.KeyCode == Enum.KeyCode.LeftControl then
+			startSprint()
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.KeyCode == Enum.KeyCode.LeftShift then
+			stopSprint()
+		end
+	end)
+
+	-- Connect to remotes
+	remotes.UpdateHealthUI.OnClientEvent:Connect(updateHealth)
+	remotes.UpdateHungerUI.OnClientEvent:Connect(updateHunger)
+	remotes.UpdateStaminaUI.OnClientEvent:Connect(updateStamina)
+
+	print("[SurvivalHUD] Initialized")
+end
+
+-- Initial HUD setup
+setupHUD()
+
+-- Re-setup HUD on respawn
+player.CharacterAdded:Connect(function()
+	isSprinting = false
+	setupHUD()
+end)
