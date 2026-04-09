@@ -1,0 +1,273 @@
+-- 🧟 ZOMBIE SPAWNER (Updated with Safe Zone Support)
+-- Spawns zombies around players with day/night scaling
+-- Prevents spawning in/near safe zones
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+
+-- Wait for modules
+local GlobalState = require(ReplicatedStorage:WaitForChild("GlobalState"))
+local ZombieConfig = require(ReplicatedStorage:WaitForChild("ZombieConfig"))
+local SafeZoneConfig = require(ReplicatedStorage:WaitForChild("SafeZoneConfig"))
+
+-- Zombie storage
+local activeZombies = {}
+local zombieCount = 0
+local lastSpawnTime = 0
+
+-- ═══════════════════════════════════════════════════════════════
+--                       ZOMBIE CREATION
+-- ═══════════════════════════════════════════════════════════════
+
+local function createZombie(zombieType, position)
+	local stats = ZombieConfig:GetZombieStats(zombieType)
+	if not stats then 
+		warn("Invalid zombie type:", zombieType)
+		return nil
+	end
+
+	-- Get zombie model from ReplicatedStorage
+	local zombieModels = ReplicatedStorage:FindFirstChild("ZombieModels")
+	if not zombieModels then
+		warn("ZombieModels folder not found in ReplicatedStorage!")
+		return nil
+	end
+
+	local typeFolder = zombieModels:FindFirstChild(stats.ModelFolder)
+	if not typeFolder then
+		warn("Zombie model folder not found:", stats.ModelFolder)
+		return nil
+	end
+
+	-- Get random model from folder
+	local models = typeFolder:GetChildren()
+	if #models == 0 then
+		warn("No models found in folder:", stats.ModelFolder)
+		return nil
+	end
+
+	local randomModel = models[math.random(1, #models)]
+	local zombie = randomModel:Clone()
+
+	-- Setup zombie
+	zombie.Name = stats.Name
+	zombie:SetPrimaryPartCFrame(CFrame.new(position))
+	zombie.Parent = workspace
+
+	-- Setup humanoid
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.Health = stats.Health
+		humanoid.MaxHealth = stats.Health
+		humanoid.WalkSpeed = stats.WalkSpeed
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+
+		-- Death handling
+		humanoid.Died:Connect(function()
+			task.wait(2)
+			zombie:Destroy()
+			activeZombies[zombie] = nil
+			zombieCount = zombieCount - 1
+		end)
+	end
+
+	-- TAG AS ENEMY (Critical for weapon system!)
+	CollectionService:AddTag(zombie, "Enemy")
+
+	-- Store zombie data
+	activeZombies[zombie] = {
+		type = zombieType,
+		stats = stats,
+		spawnTime = tick(),
+		lastAttack = 0,
+		target = nil,
+		state = "Idle"
+	}
+
+	zombieCount = zombieCount + 1
+
+	return zombie
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       SPAWN POSITION CALCULATION
+-- ═══════════════════════════════════════════════════════════════
+
+local function getSpawnPosition()
+	local alivePlayers = {}
+
+	-- Get all alive players
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+			if humanoid and humanoid.Health > 0 then
+				table.insert(alivePlayers, player)
+			end
+		end
+	end
+
+	if #alivePlayers == 0 then return nil end
+
+	-- Try multiple times to find a valid spawn position
+	for attempt = 1, 10 do
+		-- Pick random player to spawn near
+		local targetPlayer = alivePlayers[math.random(1, #alivePlayers)]
+		local playerRoot = targetPlayer.Character.HumanoidRootPart
+
+		-- Calculate spawn position (random angle and distance)
+		local angle = math.random() * math.pi * 2
+		local distance = math.random(
+			ZombieConfig.Spawning.MinSpawnDistance,
+			ZombieConfig.Spawning.MaxSpawnDistance
+		)
+
+		local offset = Vector3.new(
+			math.cos(angle) * distance,
+			0,
+			math.sin(angle) * distance
+		)
+
+		local spawnPos = playerRoot.Position + offset
+
+		-- Raycast to find ground
+		local rayOrigin = spawnPos + Vector3.new(0, 50, 0)
+		local rayDirection = Vector3.new(0, -100, 0)
+
+		local raycastParams = RaycastParams.new()
+		raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+
+		local filterList = {}
+		local zombiesFolder = workspace:FindFirstChild("Zombies")
+		if zombiesFolder then
+			table.insert(filterList, zombiesFolder)
+		end
+
+		raycastParams.FilterDescendantsInstances = filterList
+
+		local result = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+
+		if result then
+			spawnPos = result.Position + Vector3.new(0, 3, 0)
+		end
+
+		-- ✅ CHECK IF VALID (Not in safe zone)
+		if SafeZoneConfig:IsValidSpawnPosition(spawnPos) then
+			return spawnPos
+		end
+
+		-- If we reach here, position was in/near safe zone, try again
+	end
+
+	-- Failed to find valid position after 10 attempts
+	return nil
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       SPAWNING LOGIC
+-- ═══════════════════════════════════════════════════════════════
+
+local function spawnZombies()
+	local currentTime = tick()
+
+	-- Check spawn interval
+	if currentTime - lastSpawnTime < ZombieConfig.Spawning.SpawnInterval then
+		return
+	end
+
+	lastSpawnTime = currentTime
+
+	-- Get current day and night status
+	local currentDay = GlobalState.currentDay
+	local isNight = GlobalState:IsNight()
+
+	-- Calculate max zombies for this day
+	local maxZombies = ZombieConfig:GetMaxZombiesForDay(currentDay)
+	local spawnRate = ZombieConfig:GetSpawnRate(isNight)
+
+	-- Adjust max by spawn rate
+	local targetZombies = math.floor(maxZombies * spawnRate)
+
+	-- Check if we need to spawn more
+	if zombieCount >= targetZombies then
+		return
+	end
+
+	-- Spawn batch
+	local toSpawn = math.min(
+		ZombieConfig.Spawning.SpawnBatchSize,
+		targetZombies - zombieCount
+	)
+
+	for i = 1, toSpawn do
+		local spawnPos = getSpawnPosition()
+		if spawnPos then
+			local zombieType = ZombieConfig:GetRandomZombieType(isNight)
+			createZombie(zombieType, spawnPos)
+		end
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       CLEANUP & MANAGEMENT
+-- ═══════════════════════════════════════════════════════════════
+
+local function cleanupDistantZombies()
+	local alivePlayers = {}
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			table.insert(alivePlayers, player.Character.HumanoidRootPart)
+		end
+	end
+
+	if #alivePlayers == 0 then return end
+
+	for zombie, data in pairs(activeZombies) do
+		if zombie and zombie.PrimaryPart then
+			local zombiePos = zombie.PrimaryPart.Position
+			local tooFar = true
+
+			-- Check distance to all players
+			for _, playerRoot in ipairs(alivePlayers) do
+				local distance = (zombiePos - playerRoot.Position).Magnitude
+				if distance < ZombieConfig.Spawning.DespawnDistance then
+					tooFar = false
+					break
+				end
+			end
+
+			-- Despawn if too far
+			if tooFar then
+				zombie:Destroy()
+				activeZombies[zombie] = nil
+				zombieCount = zombieCount - 1
+			end
+		end
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       MAIN LOOP
+-- ═══════════════════════════════════════════════════════════════
+
+-- Main spawning loop
+task.spawn(function()
+	while true do
+		spawnZombies()
+		task.wait(1)
+	end
+end)
+
+-- Cleanup loop (runs less frequently)
+task.spawn(function()
+	while true do
+		cleanupDistantZombies()
+		task.wait(10)
+	end
+end)
+
+print("✅ Zombie Spawner initialized (with Safe Zone support)!")
+print("📊 Day 1 Target: " .. ZombieConfig:GetMaxZombiesForDay(1) .. " zombies")
+print("🌙 Night spawn rate: " .. (ZombieConfig.Spawning.NightSpawnRate * 100) .. "%")
+print("🏠 Safe zones prevent spawning: " .. tostring(SafeZoneConfig.Settings.PreventZombieSpawning))
