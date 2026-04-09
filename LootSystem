@@ -10,7 +10,7 @@ local LootSpawnSystem = {}
 -- Loot configuration with rarity tiers and spawn chances
 LootSpawnSystem.Config = {
 	-- Global spawn chance (0-100) - chance that any spawn point gets loot
-	GLOBAL_SPAWN_CHANCE = 80,
+	GLOBAL_SPAWN_CHANCE = 100,
 
 	-- Rarity tier weights (higher = more likely) - temporarily set to only spawn Common
 	RARITY_WEIGHTS = {
@@ -23,18 +23,23 @@ LootSpawnSystem.Config = {
 	-- Loot items per tier with individual spawn weights
 	LOOT_ITEMS = {
 		Common = {
-			{name = "Wood Plank", weight = 100},
-			{name = "Batteries", weight = 100}
-			
+			{name = "Wood", weight = 100},
+			{name = "Batteries", weight = 100},
+			{name = "Scrap Metal", weight = 100},
+			{name = "Cloth", weight = 100}
+
 		},
 		Uncommon = {
-			-- Add items here later
+			{name = "Screws", weight = 100},
+			{name = "Wires", weight = 100},
+			{name = "DuctTape", weight = 100}		
 		},
+		
 		Rare = {
-			-- Add items here later
+			{name = "Electronic", weight = 100},
 		},
 		Legendary = {
-			-- Add items here later
+			{name = "ToolBox", weight = 100},		
 		}
 	},
 
@@ -127,7 +132,7 @@ function LootSpawnSystem.AlignToSurface(lootModel, spawnPoint)
 
 	local finalPosition = Vector3.new(
 		spawnPosition.X + randomOffsetX,
-		surfaceY + lootOffset + 0.5, -- Increased buffer to ensure visibility
+		surfaceY + lootOffset,
 		spawnPosition.Z + randomOffsetZ
 	)
 
