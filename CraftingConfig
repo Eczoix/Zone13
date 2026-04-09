@@ -1,0 +1,151 @@
+--[[
+	CraftingConfig.lua
+	ModuleScript - Place in ReplicatedStorage
+	
+	Contains all configuration settings for the crafting system.
+	Change these values to adjust tier count, colors, materials, etc.
+]]
+
+local CraftingConfig = {}
+
+-- ===========================
+-- TIER SETTINGS
+-- ===========================
+
+CraftingConfig.MAX_TIERS = 3 -- Can be increased to 4, 5, etc. to add more tiers
+
+CraftingConfig.TIER_NAMES = {
+	[1] = "Crafting Bench 1",
+	[2] = "Crafting Bench 2",
+	[3] = "Crafting Bench 3",
+	-- Add more if MAX_TIERS increases
+}
+
+-- Item required to unlock the next tier
+CraftingConfig.UNLOCK_ITEM = "Toolbox"
+
+-- ===========================
+-- MATERIAL ICONS
+-- ===========================
+
+CraftingConfig.MATERIAL_ICONS = {
+	Wood = "🌲",
+	Screws = "🔩",
+	ScrapMetal = "⚙️",
+	Batteries = "🔋",
+	Cloth = "👕",
+	Electronic = "📱",
+	ToolBox = "🧰",
+	Wires = "🔌",
+	DuctTape = "🩹",
+	
+}
+
+-- List of all materials (for creating counters if needed)
+CraftingConfig.ALL_MATERIALS = {
+	"Wood","Scrap Metal", "Batteries", "ToolBox",
+	"Cloth", "Electronic", "Screws", "DuctTape", "Wires",
+	
+}
+
+-- ===========================
+-- COLOR PALETTE
+-- ===========================
+
+CraftingConfig.COLORS = {
+	-- Main colors
+	BackgroundDark = Color3.fromRGB(25, 25, 30),
+	AccentGold = Color3.fromRGB(180, 140, 50),
+	MediumGray = Color3.fromRGB(45, 45, 50),
+	BorderGray = Color3.fromRGB(60, 60, 65),
+	LightGray = Color3.fromRGB(150, 150, 150),
+
+	-- Status colors
+	GreenCraftable = Color3.fromRGB(40, 120, 40),
+	RedCantCraft = Color3.fromRGB(150, 0, 0),
+	GrayLocked = Color3.fromRGB(80, 80, 85),
+
+	-- Panel colors
+	DarkPanel = Color3.fromRGB(30, 30, 35),
+	MediumPanel = Color3.fromRGB(40, 40, 45),
+
+	-- Text colors
+	WhiteText = Color3.fromRGB(255, 255, 255),
+	GrayText = Color3.fromRGB(180, 180, 180),
+	YellowText = Color3.fromRGB(255, 220, 100),
+}
+
+-- ===========================
+-- LAYOUT SETTINGS
+-- ===========================
+
+CraftingConfig.LAYOUT = {
+	-- How many recipe cards per row
+	CARDS_PER_ROW = 3,
+
+	-- Recipe card sizes
+	CARD_WIDTH_SCALE = 0.32, -- 32% width (3 cards = 96% + gaps)
+	CARD_HEIGHT = 120,
+
+	-- Material counter settings
+	MATERIAL_COUNTER_WIDTH = 100,
+	MATERIAL_COUNTER_HEIGHT = 60,
+
+	-- Tier separator layout order increments
+	TIER_SEPARATOR_INCREMENT = 100, -- Tier 1 = 100, Tier 2 = 200, etc.
+}
+
+-- ===========================
+-- DATASTORE SETTINGS
+-- ===========================
+
+CraftingConfig.DATASTORE_NAME = "PlayerCraftingData"
+CraftingConfig.DATASTORE_KEY_PREFIX = "Player_"
+
+-- Default tier for new players
+CraftingConfig.DEFAULT_TIER = 1
+
+-- ===========================
+-- CRAFTING SETTINGS
+-- ===========================
+
+-- Show crafting progress bar?
+CraftingConfig.SHOW_CRAFT_PROGRESS = true
+
+-- Allow canceling crafting?
+CraftingConfig.ALLOW_CRAFT_CANCEL = false
+
+-- Close GUI after successful craft?
+CraftingConfig.CLOSE_GUI_AFTER_CRAFT = false
+
+-- ===========================
+-- HELPER FUNCTIONS
+-- ===========================
+
+-- Get material icon by name
+function CraftingConfig.GetMaterialIcon(materialName)
+	return CraftingConfig.MATERIAL_ICONS[materialName] or "❓"
+end
+
+-- Get tier name by number
+function CraftingConfig.GetTierName(tierNumber)
+	return CraftingConfig.TIER_NAMES[tierNumber] or "Unknown Tier"
+end
+
+-- Check if tier is valid
+function CraftingConfig.IsValidTier(tierNumber)
+	return tierNumber >= 1 and tierNumber <= CraftingConfig.MAX_TIERS
+end
+
+-- Get color for recipe card based on state
+function CraftingConfig.GetCardColor(canCraft, isLocked)
+	if isLocked then
+		return CraftingConfig.COLORS.GrayLocked
+	elseif canCraft then
+		return CraftingConfig.COLORS.GreenCraftable
+	else
+		return CraftingConfig.COLORS.RedCantCraft
+	end
+end
+
+return CraftingConfig
