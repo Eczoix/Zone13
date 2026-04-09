@@ -1,0 +1,852 @@
+-- 🧠 ZOMBIE AI SYSTEM V3
+-- Real-time responsive AI with target prediction
+-- No more delayed following - zombies react instantly to your movements
+
+local CollectionService = game:GetService("CollectionService")
+local PathfindingService = game:GetService("PathfindingService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+-- Modules
+local ZombieConfig = require(ReplicatedStorage:WaitForChild("ZombieConfig"))
+
+-- ═══════════════════════════════════════════════════════════════
+--                       ANIMATION SYSTEM
+-- ═══════════════════════════════════════════════════════════════
+
+-- Default Roblox animation IDs (placeholders)
+local DEFAULT_ANIMATIONS = {
+	Idle = "rbxassetid://507766388",      -- Default idle
+	Walk = "rbxassetid://507777826",      -- Default walk
+	Run = "rbxassetid://507767714",       -- Default run
+	Attack = "rbxassetid://507768133",    -- Default slash/punch
+}
+
+-- Animation states
+local zombieAnimations = {}
+
+-- Load animations for a zombie
+local function loadAnimations(zombie, zombieType)
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return nil end
+
+	local animator = humanoid:FindFirstChildOfClass("Animator")
+	if not animator then
+		animator = Instance.new("Animator")
+		animator.Parent = humanoid
+	end
+
+	-- Get animation IDs from config (or use defaults)
+	local stats = ZombieConfig:GetZombieStats(zombieType)
+	local animIds = stats.Animations or {}
+
+	-- Create animation tracks
+	local animations = {
+		Idle = nil,
+		RoamWalk = nil,
+		Chase = nil,
+		Attack = nil,
+
+		currentTrack = nil,
+		currentState = "Idle"
+	}
+
+	-- Load Idle animation
+	local idleAnim = Instance.new("Animation")
+	idleAnim.AnimationId = animIds.Idle or DEFAULT_ANIMATIONS.Idle
+	animations.Idle = animator:LoadAnimation(idleAnim)
+	animations.Idle.Looped = true
+	animations.Idle.Priority = Enum.AnimationPriority.Idle
+
+	-- Load Roam Walk animation
+	local roamWalkAnim = Instance.new("Animation")
+	roamWalkAnim.AnimationId = animIds.RoamWalk or DEFAULT_ANIMATIONS.Walk
+	animations.RoamWalk = animator:LoadAnimation(roamWalkAnim)
+	animations.RoamWalk.Looped = true
+	animations.RoamWalk.Priority = Enum.AnimationPriority.Movement
+
+	-- Load Chase animation
+	local chaseAnim = Instance.new("Animation")
+	chaseAnim.AnimationId = animIds.Chase or DEFAULT_ANIMATIONS.Run
+	animations.Chase = animator:LoadAnimation(chaseAnim)
+	animations.Chase.Looped = true
+	animations.Chase.Priority = Enum.AnimationPriority.Movement
+
+	-- Load Attack animation
+	local attackAnim = Instance.new("Animation")
+	attackAnim.AnimationId = animIds.Attack or DEFAULT_ANIMATIONS.Attack
+	animations.Attack = animator:LoadAnimation(attackAnim)
+	animations.Attack.Looped = false
+	animations.Attack.Priority = Enum.AnimationPriority.Action
+
+	return animations
+end
+
+-- Play animation with smooth transition
+local function playAnimation(zombie, animationName)
+	local animData = zombieAnimations[zombie]
+	if not animData then 
+		warn("No animation data for zombie:", zombie.Name)
+		return 
+	end
+
+	local targetTrack = animData[animationName]
+	if not targetTrack then 
+		warn("Animation not found:", animationName, "for zombie:", zombie.Name)
+		return 
+	end
+
+	-- Don't replay if already playing
+	if animData.currentState == animationName and targetTrack.IsPlaying then
+		return
+	end
+
+	-- Stop current animation
+	if animData.currentTrack and animData.currentTrack.IsPlaying then
+		animData.currentTrack:Stop(0.2) -- Smooth 0.2s fade out
+	end
+
+	-- Play new animation
+	targetTrack:Play(0.2) -- Smooth 0.2s fade in
+	animData.currentTrack = targetTrack
+	animData.currentState = animationName
+
+	print("Playing animation:", animationName, "for", zombie.Name, "Priority:", targetTrack.Priority) -- DEBUG
+end
+
+-- Stop all animations
+local function stopAllAnimations(zombie)
+	local animData = zombieAnimations[zombie]
+	if not animData then return end
+
+	for name, track in pairs(animData) do
+		if type(track) == "userdata" and track.IsPlaying then
+			track:Stop(0.2)
+		end
+	end
+
+	animData.currentTrack = nil
+	animData.currentState = "Idle"
+end
+
+-- AI State tracking
+local zombieStates = {}
+local updateQueue = {}
+
+-- Performance settings
+local CLOSE_RANGE_DISTANCE = 30 -- Within this range, use direct movement
+local PATH_UPDATE_INTERVAL = 1.5 -- Only recalc path every 1.5 seconds for distant targets
+local PREDICTION_MULTIPLIER = 0.8 -- Predict target's future position
+
+-- AI Update Throttling (Performance optimization)
+local NEAR_DISTANCE = 80 -- Update every frame (instant reactions in combat)
+local FAR_DISTANCE = 150 -- Update every 2 seconds (medium distance)
+local VERY_FAR_DISTANCE = 200 -- Update every 5 seconds (distant zombies)
+
+local NEAR_UPDATE_INTERVAL = 0 -- Every frame for close zombies
+local FAR_UPDATE_INTERVAL = 2 -- 2 seconds for far zombies
+local VERY_FAR_UPDATE_INTERVAL = 5 -- 5 seconds for very far zombies
+
+-- Roaming settings (Dying Light style)
+local ROAM_MIN_DISTANCE = 8 -- Minimum roam distance
+local ROAM_MAX_DISTANCE = 20 -- Maximum roam distance (shorter than before)
+local ROAM_PAUSE_MIN = 2 -- Minimum pause time between roams
+local ROAM_PAUSE_MAX = 6 -- Maximum pause time between roams
+local ROAM_WALK_TIME_MIN = 3 -- Minimum time spent walking to a spot
+local ROAM_WALK_TIME_MAX = 8 -- Maximum time spent walking
+
+-- Pathfinding settings (simplified)
+local pathParams = {
+	AgentRadius = 2,
+	AgentHeight = 5,
+	AgentCanJump = true,
+	WaypointSpacing = 6, -- Increased for smoother paths
+	Costs = {
+		Water = math.huge,
+	}
+}
+
+-- ═══════════════════════════════════════════════════════════════
+--                       UTILITY FUNCTIONS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Get update interval based on distance to nearest player
+local function getUpdateInterval(zombiePosition)
+	local nearestDistance = math.huge
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+			local distance = (player.Character.HumanoidRootPart.Position - zombiePosition).Magnitude
+			if distance < nearestDistance then
+				nearestDistance = distance
+			end
+		end
+	end
+
+	-- Return appropriate update interval
+	if nearestDistance < NEAR_DISTANCE then
+		return NEAR_UPDATE_INTERVAL -- Every frame (instant)
+	elseif nearestDistance < FAR_DISTANCE then
+		return FAR_UPDATE_INTERVAL -- Every 2 seconds
+	else
+		return VERY_FAR_UPDATE_INTERVAL -- Every 5 seconds
+	end
+end
+
+-- Get nearest player to zombie
+local function getNearestPlayer(zombiePosition)
+	local nearestPlayer = nil
+	local nearestDistance = math.huge
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player.Character then
+			local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+			local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+
+			if humanoid and rootPart and humanoid.Health > 0 then
+				-- Check if player is in safe zone
+				local inSafeZone = _G.IsPlayerInSafeZone and _G.IsPlayerInSafeZone(player)
+
+				if not inSafeZone then
+					local distance = (rootPart.Position - zombiePosition).Magnitude
+
+					if distance < nearestDistance then
+						nearestDistance = distance
+						nearestPlayer = player
+					end
+				end
+			end
+		end
+	end
+
+	return nearestPlayer, nearestDistance
+end
+
+-- Predict where target will be
+local function predictTargetPosition(targetRoot, distance)
+	if not targetRoot then return nil end
+
+	-- Get target's velocity
+	local velocity = targetRoot.AssemblyLinearVelocity
+
+	-- Calculate how long it takes zombie to reach target
+	local timeToReach = distance / 16 -- Assuming average zombie speed of 16
+
+	-- Predict future position
+	local predictedPosition = targetRoot.Position + (velocity * timeToReach * PREDICTION_MULTIPLIER)
+
+	return predictedPosition
+end
+
+-- Get random roam position near zombie
+local function getRandomRoamPosition(zombiePosition)
+	-- Random angle
+	local angle = math.random() * math.pi * 2
+
+	-- Random distance (much shorter for realistic shambling)
+	local distance = math.random(ROAM_MIN_DISTANCE, ROAM_MAX_DISTANCE)
+
+	-- Calculate position
+	local offsetX = math.cos(angle) * distance
+	local offsetZ = math.sin(angle) * distance
+
+	local roamPosition = zombiePosition + Vector3.new(offsetX, 0, offsetZ)
+
+	return roamPosition
+end
+
+-- Check if there's a clear line of sight
+local function hasLineOfSight(fromPosition, toPosition)
+	local direction = (toPosition - fromPosition)
+	local distance = direction.Magnitude
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	-- Build filter list with only existing folders
+	local filterList = {}
+	if workspace:FindFirstChild("Zombies") then
+		table.insert(filterList, workspace.Zombies)
+	end
+	if workspace:FindFirstChild("Effects") then
+		table.insert(filterList, workspace.Effects)
+	end
+
+	rayParams.FilterDescendantsInstances = filterList
+
+	local result = workspace:Raycast(fromPosition, direction.Unit * distance, rayParams)
+
+	-- If no hit or hit is far away, we have line of sight
+	return result == nil or result.Distance > (distance - 5)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       MOVEMENT SYSTEM
+-- ═══════════════════════════════════════════════════════════════
+
+-- Direct movement (for close range)
+local function moveDirectly(zombie, targetPosition, humanoid, state)
+	if not zombie.PrimaryPart then return end
+
+	local currentTime = tick()
+	local JUMP_COOLDOWN = 1.5 -- Can only jump once every 1.5 seconds
+
+	-- Check for obstacles in front
+	local zombiePos = zombie.PrimaryPart.Position
+	local direction = (targetPosition - zombiePos).Unit
+	local checkDistance = 5 -- Check 5 studs ahead
+
+	-- Raycast forward at chest height
+	local rayOrigin = zombiePos + Vector3.new(0, 2, 0)
+	local rayDirection = direction * checkDistance
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	local filterList = {zombie}
+	if workspace:FindFirstChild("Zombies") then
+		table.insert(filterList, workspace.Zombies)
+	end
+	rayParams.FilterDescendantsInstances = filterList
+
+	local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+
+	-- If we hit something, check if we can jump over it
+	if result then
+		local hitPart = result.Instance
+
+		-- Check if obstacle is jumpable (small obstacles)
+		if hitPart and hitPart:IsA("BasePart") then
+			local obstacleHeight = hitPart.Size.Y
+
+			-- If obstacle is between 2-6 studs tall, try jumping (with cooldown)
+			if obstacleHeight >= 2 and obstacleHeight <= 6 then
+				if currentTime - state.lastJump >= JUMP_COOLDOWN then
+					humanoid.Jump = true
+					state.lastJump = currentTime
+				end
+			end
+		end
+	end
+
+	-- Use predicted position for more responsive movement
+	local distance = (zombie.PrimaryPart.Position - targetPosition).Magnitude
+	local predictedPos = predictTargetPosition(state.targetRoot, distance)
+
+	if predictedPos then
+		humanoid:MoveTo(predictedPos)
+	else
+		humanoid:MoveTo(targetPosition)
+	end
+
+	state.movementMode = "Direct"
+end
+
+-- Pathfinding movement (for long range or obstacles)
+local function moveWithPathfinding(zombie, targetPosition, humanoid, state)
+	local currentTime = tick()
+
+	-- Don't recalculate path too often
+	if state.lastPathCalc and (currentTime - state.lastPathCalc) < PATH_UPDATE_INTERVAL then
+		return
+	end
+
+	state.lastPathCalc = currentTime
+
+	-- Create path
+	local path = PathfindingService:CreatePath(pathParams)
+
+	local success = pcall(function()
+		path:ComputeAsync(zombie.PrimaryPart.Position, targetPosition)
+	end)
+
+	if success and path.Status == Enum.PathStatus.Success then
+		local waypoints = path:GetWaypoints()
+
+		if #waypoints > 0 then
+			-- Only move to next few waypoints (more responsive)
+			local targetWaypoint = waypoints[math.min(3, #waypoints)]
+
+			if targetWaypoint.Action == Enum.PathWaypointAction.Jump then
+				humanoid.Jump = true
+			end
+
+			humanoid:MoveTo(targetWaypoint.Position)
+			state.movementMode = "Pathfinding"
+		end
+	else
+		-- Pathfinding failed, try direct movement
+		moveDirectly(zombie, targetPosition, humanoid, state)
+	end
+end
+
+-- Smart movement decision
+local function moveToTarget(zombie, targetRoot, humanoid, state, distance)
+	if not zombie.PrimaryPart or not targetRoot then return end
+
+	local zombiePos = zombie.PrimaryPart.Position
+	local targetPos = targetRoot.Position
+
+	-- CLOSE RANGE: Direct movement (responsive and fast)
+	if distance < CLOSE_RANGE_DISTANCE then
+		moveDirectly(zombie, targetPos, humanoid, state)
+		return
+	end
+
+	-- MEDIUM/FAR RANGE: Check line of sight
+	if hasLineOfSight(zombiePos, targetPos) then
+		-- Clear path - use direct movement
+		moveDirectly(zombie, targetPos, humanoid, state)
+	else
+		-- Obstacles in the way - use pathfinding
+		moveWithPathfinding(zombie, targetPos, humanoid, state)
+	end
+end
+
+-- Roaming behavior when idle (Dying Light style)
+local function roamAround(zombie, humanoid, state)
+	if not zombie.PrimaryPart then return end
+
+	local currentTime = tick()
+
+	-- Initialize roaming state
+	if not state.roamState then
+		state.roamState = "pausing"
+		state.roamStateStartTime = currentTime
+		state.roamPauseDuration = math.random(ROAM_PAUSE_MIN, ROAM_PAUSE_MAX)
+		humanoid:MoveTo(zombie.PrimaryPart.Position) -- Stop moving
+	end
+
+	-- PAUSING STATE (standing still, looking around)
+	if state.roamState == "pausing" then
+		local pauseElapsed = currentTime - state.roamStateStartTime
+
+		-- Set walk speed to 0 during pause
+		humanoid.WalkSpeed = 0
+		humanoid:MoveTo(zombie.PrimaryPart.Position)
+
+		-- Play idle animation
+		playAnimation(zombie, "Idle")
+
+		-- Pause time over, start walking
+		if pauseElapsed >= state.roamPauseDuration then
+			state.roamState = "walking"
+			state.roamStateStartTime = currentTime
+			state.roamWalkDuration = math.random(ROAM_WALK_TIME_MIN, ROAM_WALK_TIME_MAX)
+			state.roamTarget = getRandomRoamPosition(zombie.PrimaryPart.Position)
+
+			-- Set slow walk speed from config (WalkSpeed, not ChaseSpeed!)
+			humanoid.WalkSpeed = state.stats.WalkSpeed
+		end
+
+		-- WALKING STATE (slow shambling)
+	elseif state.roamState == "walking" then
+		local walkElapsed = currentTime - state.roamStateStartTime
+
+		-- Make sure speed is set to WalkSpeed from config
+		if humanoid.WalkSpeed ~= state.stats.WalkSpeed then
+			humanoid.WalkSpeed = state.stats.WalkSpeed
+			print("Setting zombie walk speed to:", state.stats.WalkSpeed) -- DEBUG
+		end
+
+		-- Play roam walk animation
+		playAnimation(zombie, "RoamWalk")
+
+		-- Check if reached roam target or walk time expired
+		local reachedTarget = false
+		if state.roamTarget then
+			local distanceToRoam = (zombie.PrimaryPart.Position - state.roamTarget).Magnitude
+
+			local JUMP_COOLDOWN = 1.5
+
+			-- Check for obstacles while roaming
+			local direction = (state.roamTarget - zombie.PrimaryPart.Position).Unit
+			local rayOrigin = zombie.PrimaryPart.Position + Vector3.new(0, 2, 0)
+			local rayDirection = direction * 5
+
+			local rayParams = RaycastParams.new()
+			rayParams.FilterType = Enum.RaycastFilterType.Exclude
+			local filterList = {zombie}
+			if workspace:FindFirstChild("Zombies") then
+				table.insert(filterList, workspace.Zombies)
+			end
+			rayParams.FilterDescendantsInstances = filterList
+
+			local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+
+			-- Jump over small obstacles (with cooldown)
+			if result and result.Instance:IsA("BasePart") then
+				local obstacleHeight = result.Instance.Size.Y
+				if obstacleHeight >= 2 and obstacleHeight <= 6 then
+					if currentTime - state.lastJump >= JUMP_COOLDOWN then
+						humanoid.Jump = true
+						state.lastJump = currentTime
+					end
+				end
+			end
+
+			-- DEBUG: Print zombie status
+			if math.random() < 0.01 then -- Print occasionally to avoid spam
+				print(zombie.Name, "walking - Speed:", humanoid.WalkSpeed, "Distance to target:", math.floor(distanceToRoam))
+			end
+
+			if distanceToRoam < 3 then
+				reachedTarget = true
+			else
+				-- Keep walking to target
+				humanoid:MoveTo(state.roamTarget)
+			end
+		end
+
+		-- Time to pause again
+		if walkElapsed >= state.roamWalkDuration or reachedTarget then
+			state.roamState = "pausing"
+			state.roamStateStartTime = currentTime
+			state.roamPauseDuration = math.random(ROAM_PAUSE_MIN, ROAM_PAUSE_MAX)
+			state.roamTarget = nil
+			humanoid:MoveTo(zombie.PrimaryPart.Position)
+		end
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       COMBAT SYSTEM
+-- ═══════════════════════════════════════════════════════════════
+
+-- Check if zombie can attack target
+local function canAttack(zombie, target, stats)
+	if not target or not target.Parent then return false end
+
+	local zombieRoot = zombie.PrimaryPart
+	local targetRoot = target:FindFirstChild("HumanoidRootPart")
+
+	if not zombieRoot or not targetRoot then return false end
+
+	-- Check distance
+	local distance = (zombieRoot.Position - targetRoot.Position).Magnitude
+	if distance > stats.AttackRange then
+		return false
+	end
+
+	-- Check line of sight (can't attack through walls)
+	local rayOrigin = zombieRoot.Position + Vector3.new(0, 2, 0) -- From zombie's chest
+	local rayDirection = (targetRoot.Position - rayOrigin)
+
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+
+	-- Build filter list
+	local filterList = {zombie}
+	if workspace:FindFirstChild("Zombies") then
+		table.insert(filterList, workspace.Zombies)
+	end
+	if workspace:FindFirstChild("Effects") then
+		table.insert(filterList, workspace.Effects)
+	end
+
+	rayParams.FilterDescendantsInstances = filterList
+
+	local result = workspace:Raycast(rayOrigin, rayDirection, rayParams)
+
+	-- If raycast hit something before reaching player, can't attack
+	if result then
+		-- Check if we hit the player or something else
+		local hitCharacter = result.Instance:FindFirstAncestorOfClass("Model")
+		if hitCharacter ~= target then
+			return false -- Hit a wall or obstacle
+		end
+	end
+
+	return true
+end
+
+-- Lunge forward during attack
+local function lungeAtTarget(zombie, targetPosition)
+	local rootPart = zombie.PrimaryPart
+	if not rootPart then return end
+
+	-- Play attack animation
+	playAnimation(zombie, "Attack")
+
+	-- Calculate lunge direction
+	local direction = (targetPosition - rootPart.Position).Unit
+	local lungeDistance = 4 -- Lunge 4 studs forward
+
+	-- Create temporary velocity to push zombie forward
+	local bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.Velocity = direction * 30 -- Speed of lunge
+	bodyVelocity.MaxForce = Vector3.new(4000, 0, 4000) -- Only horizontal movement
+	bodyVelocity.Parent = rootPart
+
+	-- Remove after 0.2 seconds
+	task.delay(0.2, function()
+		if bodyVelocity and bodyVelocity.Parent then
+			bodyVelocity:Destroy()
+		end
+	end)
+end
+
+-- Perform attack on player
+local function attackPlayer(zombie, target, stats, state)
+	-- Check attack cooldown
+	local currentTime = tick()
+	if currentTime - state.lastAttack < stats.AttackCooldown then
+		return
+	end
+
+	local targetRoot = target:FindFirstChild("HumanoidRootPart")
+	if not targetRoot then return end
+
+	-- Lunge forward
+	lungeAtTarget(zombie, targetRoot.Position)
+
+	-- Delay damage slightly so lunge connects first
+	task.delay(0.15, function()
+		if not target or not target.Parent then return end
+
+		local targetHumanoid = target:FindFirstChildOfClass("Humanoid")
+		if targetHumanoid and targetHumanoid.Health > 0 then
+			targetHumanoid:TakeDamage(stats.Damage)
+		end
+	end)
+
+	state.lastAttack = currentTime
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       AI CORE
+-- ═══════════════════════════════════════════════════════════════
+
+-- Initialize zombie AI state
+local function initializeZombieAI(zombie)
+	if not zombie:IsA("Model") then return end
+
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	if not humanoid then return end
+
+	local rootPart = zombie.PrimaryPart or zombie:FindFirstChild("HumanoidRootPart")
+	if not rootPart then return end
+
+	if not zombie.PrimaryPart then
+		zombie.PrimaryPart = rootPart
+	end
+
+	-- CRITICAL: Unanchor all parts so zombie can move
+	rootPart.Anchored = false
+	for _, part in pairs(zombie:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = false
+		end
+	end
+
+	-- Get zombie stats
+	local stats = ZombieConfig:GetZombieStats(zombie.Name)
+	if not stats then 
+		for typeName, _ in pairs(ZombieConfig.ZombieTypes) do
+			if string.find(zombie.Name, typeName) then
+				stats = ZombieConfig:GetZombieStats(typeName)
+				break
+			end
+		end
+
+		if not stats then
+			stats = ZombieConfig:GetZombieStats("Walker")
+			if not stats then return end
+		end
+	end
+
+	-- Initialize state
+	zombieStates[zombie] = {
+		stats = stats,
+		target = nil,
+		targetRoot = nil,
+		lastAttack = 0,
+		lastPathCalc = 0,
+		lastUpdate = 0, -- For throttling updates
+		lastJump = 0,   -- For jump cooldown
+		state = "Idle",
+		movementMode = "None",
+
+		-- Roaming (Dying Light style)
+		roamState = nil, -- "pausing" or "walking"
+		roamStateStartTime = 0,
+		roamPauseDuration = 0,
+		roamWalkDuration = 0,
+		roamTarget = nil,
+	}
+
+	-- Load animations
+	local animations = loadAnimations(zombie, zombie.Name)
+	if animations then
+		zombieAnimations[zombie] = animations
+		-- Start with idle animation
+		playAnimation(zombie, "Idle")
+	end
+
+	table.insert(updateQueue, zombie)
+end
+
+-- Main AI update
+local function updateZombieAI(zombie)
+	if not zombie or not zombie.Parent then 
+		zombieStates[zombie] = nil
+		return 
+	end
+
+	local state = zombieStates[zombie]
+	if not state then return end
+
+	local humanoid = zombie:FindFirstChildOfClass("Humanoid")
+	local rootPart = zombie.PrimaryPart
+
+	if not humanoid or not rootPart or humanoid.Health <= 0 then
+		return
+	end
+
+	local stats = state.stats
+
+	-- Find nearest player
+	local nearestPlayer, distance = getNearestPlayer(rootPart.Position)
+
+	-- No players nearby
+	if not nearestPlayer then
+		state.state = "Idle"
+		state.target = nil
+		state.targetRoot = nil
+		roamAround(zombie, humanoid, state) -- Roam instead of standing still
+		return
+	end
+
+	-- Player too far
+	if distance > stats.DetectionRange then
+		state.state = "Idle"
+		state.target = nil
+		state.targetRoot = nil
+		roamAround(zombie, humanoid, state) -- Roam instead of standing still
+		return
+	end
+
+	-- Player detected! Stop roaming
+	state.roamTarget = nil
+	state.roamState = nil -- Reset roaming behavior
+
+	-- Safety check - player might have left
+	if not nearestPlayer or not nearestPlayer.Character then
+		state.state = "Idle"
+		state.target = nil
+		state.targetRoot = nil
+		roamAround(zombie, humanoid, state)
+		return
+	end
+
+	state.target = nearestPlayer.Character
+	state.targetRoot = state.target:FindFirstChild("HumanoidRootPart")
+
+	if not state.targetRoot then return end
+
+	-- Set correct speed
+	if humanoid.WalkSpeed ~= stats.ChaseSpeed then
+		humanoid.WalkSpeed = stats.ChaseSpeed
+	end
+
+	-- ATTACK MODE
+	if canAttack(zombie, state.target, stats) then
+		state.state = "Attacking"
+		humanoid:MoveTo(rootPart.Position) -- Stop moving
+		attackPlayer(zombie, state.target, stats, state)
+		return
+	end
+
+	-- CHASE MODE
+	state.state = "Chasing"
+
+	-- Play chase animation
+	playAnimation(zombie, "Chase")
+
+	moveToTarget(zombie, state.targetRoot, humanoid, state, distance)
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       ZOMBIE DETECTION
+-- ═══════════════════════════════════════════════════════════════
+
+CollectionService:GetInstanceAddedSignal("Enemy"):Connect(function(instance)
+	if instance:IsA("Model") then
+		local humanoid = instance:FindFirstChildOfClass("Humanoid")
+		if humanoid then
+			task.wait(0.1)
+			initializeZombieAI(instance)
+		end
+	end
+end)
+
+CollectionService:GetInstanceRemovedSignal("Enemy"):Connect(function(instance)
+	if zombieStates[instance] then
+		-- Stop all animations
+		stopAllAnimations(instance)
+
+		zombieStates[instance] = nil
+		zombieAnimations[instance] = nil
+
+		for i, zombie in ipairs(updateQueue) do
+			if zombie == instance then
+				table.remove(updateQueue, i)
+				break
+			end
+		end
+	end
+end)
+
+-- Initialize existing zombies
+for _, zombie in ipairs(CollectionService:GetTagged("Enemy")) do
+	if zombie:IsA("Model") and zombie:FindFirstChildOfClass("Humanoid") then
+		initializeZombieAI(zombie)
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       UPDATE LOOP (OPTIMIZED)
+-- ═══════════════════════════════════════════════════════════════
+
+-- Staggered update system for performance
+local updateIndex = 1
+
+RunService.Heartbeat:Connect(function()
+	if #updateQueue == 0 then return end
+
+	local currentTime = tick()
+
+	-- Process one zombie per frame (staggered updates)
+	local zombie = updateQueue[updateIndex]
+
+	if zombie and zombie.Parent then
+		local state = zombieStates[zombie]
+		if state then
+			local rootPart = zombie.PrimaryPart
+
+			if rootPart then
+				-- Determine update interval based on distance
+				local updateInterval = getUpdateInterval(rootPart.Position)
+
+				-- Check if enough time has passed since last update
+				if currentTime - state.lastUpdate >= updateInterval then
+					state.lastUpdate = currentTime
+					updateZombieAI(zombie)
+				end
+			end
+		end
+	else
+		-- Zombie is gone, remove from queue
+		table.remove(updateQueue, updateIndex)
+		updateIndex = updateIndex - 1
+	end
+
+	-- Move to next zombie
+	updateIndex = updateIndex + 1
+	if updateIndex > #updateQueue then
+		updateIndex = 1
+	end
+end)
+
+print("✅ Zombie AI System V4 initialized - Optimized performance + Dying Light roaming")
