@@ -1,0 +1,171 @@
+-- 🏠 SAFE ZONE UI (Client)
+-- Shows visual feedback when entering/exiting safe zones
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Wait for remote
+local SafeZoneRemote = ReplicatedStorage:WaitForChild("SafeZoneRemote")
+
+-- UI State
+local currentZone = nil
+local safeZoneUI = nil
+local isAnimating = false
+local currentTween = nil
+
+-- ═══════════════════════════════════════════════════════════════
+--                       CREATE UI
+-- ═══════════════════════════════════════════════════════════════
+
+local function createSafeZoneUI()
+	-- Main ScreenGui
+	local screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "SafeZoneUI"
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.DisplayOrder = 100
+	screenGui.Parent = playerGui
+
+	-- Simple text label (exactly like notifications)
+	local textLabel = Instance.new("TextLabel")
+	textLabel.Name = "SafeZoneText"
+	textLabel.Size = UDim2.new(0.5, 0, 0.08, 0)  -- Using scale like notifications
+	textLabel.Position = UDim2.new(0.5, 0, 0.12, 0)  -- Below HUD
+	textLabel.AnchorPoint = Vector2.new(0.5, 0)
+	textLabel.BackgroundTransparency = 1  -- No background
+	textLabel.BorderSizePixel = 0
+	textLabel.Text = ""
+	textLabel.TextColor3 = Color3.fromRGB(46, 204, 113) -- Green
+	textLabel.TextScaled = true
+	textLabel.Font = Enum.Font.GothamBold
+	textLabel.TextTransparency = 1  -- Start invisible
+	textLabel.TextStrokeTransparency = 0.5  -- Outline for readability
+	textLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
+	textLabel.Parent = screenGui
+
+	-- Text size constraint
+	local textConstraint = Instance.new("UITextSizeConstraint")
+	textConstraint.MaxTextSize = 32
+	textConstraint.MinTextSize = 12
+	textConstraint.Parent = textLabel
+
+	return screenGui
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       ANIMATIONS
+-- ═══════════════════════════════════════════════════════════════
+
+local function showSafeZoneUI(zoneName)
+	-- Cancel any existing animation
+	if currentTween then
+		currentTween:Cancel()
+		currentTween = nil
+	end
+
+	-- If already animating, reset
+	if isAnimating then
+		isAnimating = false
+		task.wait(0.1) -- Brief delay to let previous animation stop
+	end
+
+	if not safeZoneUI then
+		safeZoneUI = createSafeZoneUI()
+	end
+
+	local textLabel = safeZoneUI.SafeZoneText
+
+	-- Set text
+	textLabel.Text = "Entered Safe Zone"
+
+	isAnimating = true
+
+	-- Fade in
+	currentTween = TweenService:Create(
+		textLabel,
+		TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{TextTransparency = 0}
+	)
+	currentTween:Play()
+	currentTween.Completed:Wait()
+
+	-- Only continue if still animating (not cancelled)
+	if not isAnimating then
+		return
+	end
+
+	-- Wait 3 seconds then fade out automatically
+	task.wait(3)
+
+	-- Check again if still animating
+	if not isAnimating then
+		return
+	end
+
+	currentTween = TweenService:Create(
+		textLabel,
+		TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{TextTransparency = 1}
+	)
+	currentTween:Play()
+	currentTween.Completed:Wait()
+
+	-- Clear text
+	textLabel.Text = ""
+	isAnimating = false
+	currentTween = nil
+end
+
+local function hideSafeZoneUI()
+	-- Cancel ongoing animation when player exits
+	if currentTween then
+		currentTween:Cancel()
+		currentTween = nil
+	end
+	isAnimating = false
+
+	if safeZoneUI then
+		local textLabel = safeZoneUI.SafeZoneText
+		textLabel.TextTransparency = 1
+		textLabel.Text = ""
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                       EVENT HANDLERS
+-- ═══════════════════════════════════════════════════════════════
+
+SafeZoneRemote.OnClientEvent:Connect(function(action, zoneID, zoneData)
+
+	-- Player entered safe zone
+	if action == "Entered" then
+		currentZone = zoneID
+		-- Use task.spawn to prevent blocking
+		task.spawn(function()
+			showSafeZoneUI(zoneData.Name)
+		end)
+		print("✅ Entered safe zone:", zoneData.Name)
+
+		-- Player exited safe zone
+	elseif action == "Exited" then
+		currentZone = nil
+		hideSafeZoneUI()
+		print("⚠️ Left safe zone")
+
+		-- Safe zone unlocked
+	elseif action == "Unlocked" then
+		print("🔓 New safe zone unlocked:", zoneData.Name)
+		-- You can add a notification here
+
+		-- Initialize all zones
+	elseif action == "Init" then
+		print("📊 Safe zones initialized")
+		-- zoneData contains all zone info
+	end
+end)
+
+print("✅ Safe Zone UI initialized")
