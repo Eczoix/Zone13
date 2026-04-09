@@ -1,0 +1,679 @@
+--[[
+	CraftingClient.lua (FIXED VERSION)
+	LocalScript - Place in StarterPlayerScripts
+	
+	FIXES:
+	- Removed green progress bars
+	- Bigger icons and text
+	- Tier buttons scroll
+]]
+
+task.wait(1)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+print("🔍 Looking for CraftingGUI...")
+
+local craftingGui = playerGui:WaitForChild("CraftingGUI", 10)
+if not craftingGui then
+	warn("❌ CraftingGUI not found after 10 seconds!")
+	return
+end
+
+print("✅ Found CraftingGUI")
+
+local mainFrame = craftingGui:WaitForChild("MainFrame", 10)
+if not mainFrame then
+	warn("❌ MainFrame not found!")
+	return
+end
+
+print("✅ Found MainFrame")
+
+local CraftingRecipes = require(ReplicatedStorage:WaitForChild("CraftingRecipes"))
+local CraftingConfig = require(ReplicatedStorage:WaitForChild("CraftingConfig"))
+
+local templatesFolder = ReplicatedStorage:WaitForChild("CraftingGuiFolder", 5)
+if not templatesFolder then
+	warn("❌ CraftingGuiFolder not found in ReplicatedStorage!")
+	return
+end
+
+local remotes = ReplicatedStorage:WaitForChild("CraftingRemotes", 10)
+if not remotes then
+	warn("❌ CraftingRemotes not found! Make sure CraftingServer is running.")
+	return
+end
+
+local requestCraftEvent = remotes:WaitForChild("RequestCraft")
+local getPlayerTierFunction = remotes:WaitForChild("GetPlayerTier")
+local getBasketInventoryFunction = remotes:WaitForChild("GetBasketInventory")
+local basketUpdatedEvent = remotes:WaitForChild("BasketUpdated")
+local tierUpdatedEvent = remotes:WaitForChild("TierUpdated")
+local craftResultEvent = remotes:WaitForChild("CraftResult")
+
+print("🔍 Loading GUI elements...")
+
+local header = mainFrame:WaitForChild("Header", 5)
+if not header then warn("❌ Header not found!"); return end
+
+local closeButton = header:WaitForChild("CloseButton", 5)
+if not closeButton then warn("❌ CloseButton not found!"); return end
+
+local titleLabel = header:WaitForChild("TitleLabel", 5)
+if not titleLabel then warn("❌ TitleLabel not found!"); return end
+
+local materialsBar = mainFrame:WaitForChild("MaterialsBar", 5)
+if not materialsBar then warn("❌ MaterialsBar not found!"); return end
+
+local tierSelector = mainFrame:WaitForChild("TierSelector", 5)
+local contentFrame = mainFrame:WaitForChild("ContentFrame", 5)
+if not contentFrame then warn("❌ ContentFrame not found!"); return end
+
+local recipeListFrame = contentFrame:WaitForChild("RecipeListFrame", 5)
+if not recipeListFrame then warn("❌ RecipeListFrame not found!"); return end
+
+local detailsPanel = contentFrame:WaitForChild("DetailsPanel", 5)
+if not detailsPanel then warn("❌ DetailsPanel not found!"); return end
+
+local previewFrame = detailsPanel:WaitForChild("PreviewFrame", 5)
+if not previewFrame then warn("❌ PreviewFrame not found!"); return end
+
+local itemIcon = previewFrame:WaitForChild("ItemIcon", 5)
+local itemName = previewFrame:WaitForChild("ItemName", 5)
+local categoryLabel = previewFrame:WaitForChild("CategoryLabel", 5)
+local descriptionLabel = previewFrame:WaitForChild("DescriptionLabel", 5)
+
+local statsFrame = detailsPanel:WaitForChild("StatsFrame", 5)
+if not statsFrame then warn("❌ StatsFrame not found!"); return end
+
+local statsContainer = statsFrame:WaitForChild("StatsContainer", 5)
+if not statsContainer then warn("❌ StatsContainer not found!"); return end
+
+local requirementsFrame = detailsPanel:WaitForChild("RequirementsFrame", 5)
+if not requirementsFrame then warn("❌ RequirementsFrame not found!"); return end
+
+local materialsContainer = requirementsFrame:WaitForChild("MaterialsContainer", 5)
+if not materialsContainer then warn("❌ MaterialsContainer not found!"); return end
+
+local craftTimeLabel = requirementsFrame:WaitForChild("CraftTimeLabel", 5)
+
+local craftButton = detailsPanel:WaitForChild("CraftButton", 5)
+if not craftButton then warn("❌ CraftButton not found!"); return end
+
+local tierSeparatorTemplate = templatesFolder:WaitForChild("TierSeparatorTemplate", 5)
+local recipeRowTemplate = templatesFolder:WaitForChild("RecipeRowTemplate", 5)
+local recipeCardTemplate = templatesFolder:WaitForChild("RecipeCardTemplate", 5)
+local materialBadgeTemplate = templatesFolder:WaitForChild("MaterialBadgeTemplate", 5)
+local statTemplate = templatesFolder:WaitForChild("StatTemplate", 5)
+
+if not (tierSeparatorTemplate and recipeRowTemplate and recipeCardTemplate and materialBadgeTemplate and statTemplate) then
+	warn("❌ Some templates are missing in CraftingGuiFolder!")
+	return
+end
+
+print("✅ All GUI elements loaded successfully!")
+
+-- ===========================
+-- STATE VARIABLES
+-- ===========================
+
+local currentPlayerTier = 1
+local currentBasketInventory = {}
+local selectedRecipe = nil
+local recipeCards = {}
+local isCrafting = false
+local tierSeparators = {}
+
+-- ===========================
+-- UTILITY FUNCTIONS
+-- ===========================
+
+local function updateMaterialCounters()
+	for _, materialCounter in pairs(materialsBar:GetChildren()) do
+		if materialCounter:IsA("Frame") and materialCounter.Name:match("Counter$") then
+			local materialName = materialCounter.Name:gsub("Counter$", "")
+			local countLabel = materialCounter:FindFirstChild("CountLabel")
+
+			if countLabel then
+				local amount = currentBasketInventory[materialName] or 0
+				countLabel.Text = tostring(amount)
+
+				if amount == 0 then
+					countLabel.TextColor3 = CraftingConfig.COLORS.GrayText
+				elseif amount < 10 then
+					countLabel.TextColor3 = CraftingConfig.COLORS.YellowText
+				else
+					countLabel.TextColor3 = CraftingConfig.COLORS.WhiteText
+				end
+			end
+		end
+	end
+end
+
+local function canCraftRecipe(recipe)
+	if not recipe or not recipe.requirements then return false end
+
+	for material, required in pairs(recipe.requirements) do
+		local have = currentBasketInventory[material] or 0
+		if have < required then
+			return false
+		end
+	end
+
+	return true
+end
+
+local function isRecipeLocked(recipe)
+	return recipe.tier > currentPlayerTier
+end
+
+-- ===========================
+-- TIER SCROLLING
+-- ===========================
+
+local function scrollToTier(tier)
+	local separator = tierSeparators[tier]
+
+	if not separator then
+		warn("⚠️ No separator found for tier", tier)
+		return
+	end
+
+	local separatorPosition = separator.AbsolutePosition.Y
+	local framePosition = recipeListFrame.AbsolutePosition.Y
+	local relativePosition = separatorPosition - framePosition
+
+	local targetPosition = relativePosition - 20
+
+	local maxScroll = recipeListFrame.AbsoluteCanvasSize.Y - recipeListFrame.AbsoluteSize.Y
+	targetPosition = math.clamp(targetPosition, 0, maxScroll)
+
+	local tweenInfo = TweenInfo.new(
+		0.5,
+		Enum.EasingStyle.Quad,
+		Enum.EasingDirection.Out
+	)
+
+	local tween = TweenService:Create(recipeListFrame, tweenInfo, {
+		CanvasPosition = Vector2.new(0, targetPosition)
+	})
+
+	tween:Play()
+
+	print("📜 Scrolled to Tier", tier)
+end
+
+-- ===========================
+-- DETAILS PANEL FUNCTIONS
+-- ===========================
+
+local function clearStats()
+	for _, child in pairs(statsContainer:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+end
+
+local function clearMaterialBadges()
+	for _, child in pairs(materialsContainer:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+end
+
+local function updateDetailsPanel(recipeName, recipe)
+	if not recipe then return end
+
+	if itemIcon then itemIcon.Text = recipe.icon or "❓" end
+	if itemName then itemName.Text = recipeName end
+	if categoryLabel then categoryLabel.Text = recipe.category or "Unknown" end
+	if descriptionLabel then descriptionLabel.Text = recipe.description or "No description available." end
+
+	clearStats()
+	if recipe.stats then
+		for i, stat in ipairs(recipe.stats) do
+			local statFrame = statTemplate:Clone()
+			local statLabel = statFrame:FindFirstChild("StatLabel")
+			if statLabel then
+				statLabel.Text = "• " .. stat
+			end
+			statFrame.LayoutOrder = i
+			statFrame.Visible = true
+			statFrame.Parent = statsContainer
+		end
+	end
+
+	clearMaterialBadges()
+	if recipe.requirements then
+		local badgeIndex = 1
+		for material, required in pairs(recipe.requirements) do
+			local badge = materialBadgeTemplate:Clone()
+			local amountLabel = badge:FindFirstChild("AmountLabel")
+
+			if amountLabel then
+				local have = currentBasketInventory[material] or 0
+				local icon = CraftingConfig.GetMaterialIcon(material)
+				amountLabel.Text = string.format("%s %d/%d", icon, have, required)
+
+				if have >= required then
+					amountLabel.TextColor3 = CraftingConfig.COLORS.GreenCraftable
+					badge.BackgroundColor3 = Color3.fromRGB(30, 60, 30)
+				else
+					amountLabel.TextColor3 = CraftingConfig.COLORS.RedCantCraft
+					badge.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+				end
+			end
+
+			badge.LayoutOrder = badgeIndex
+			badge.Visible = true
+			badge.Parent = materialsContainer
+			badgeIndex = badgeIndex + 1
+		end
+	end
+
+	if craftTimeLabel then
+		craftTimeLabel.Text = string.format("⏱️ %ds", recipe.craftTime or 0)
+	end
+
+	local locked = isRecipeLocked(recipe)
+	local canCraft = canCraftRecipe(recipe) and not locked and not isCrafting
+
+	if locked then
+		craftButton.Text = "🔒 LOCKED"
+		craftButton.BackgroundColor3 = CraftingConfig.COLORS.GrayLocked
+		craftButton.TextColor3 = CraftingConfig.COLORS.GrayText
+		craftButton.AutoButtonColor = false
+	elseif not canCraftRecipe(recipe) then
+		craftButton.Text = "❌ NOT ENOUGH MATERIALS"
+		craftButton.BackgroundColor3 = CraftingConfig.COLORS.RedCantCraft
+		craftButton.TextColor3 = CraftingConfig.COLORS.WhiteText
+		craftButton.AutoButtonColor = false
+	elseif isCrafting then
+		craftButton.Text = "⏳ CRAFTING..."
+		craftButton.BackgroundColor3 = CraftingConfig.COLORS.MediumGray
+		craftButton.TextColor3 = CraftingConfig.COLORS.GrayText
+		craftButton.AutoButtonColor = false
+	else
+		craftButton.Text = "✅ CRAFT"
+		craftButton.BackgroundColor3 = CraftingConfig.COLORS.GreenCraftable
+		craftButton.TextColor3 = CraftingConfig.COLORS.WhiteText
+		craftButton.AutoButtonColor = true
+	end
+end
+
+-- ===========================
+-- RECIPE CARD FUNCTIONS
+-- ===========================
+
+local function createRecipeCard(recipeName, recipe)
+	local card = recipeCardTemplate:Clone()
+
+	-- FIXED: Get IconLabel from IconFrame (not directly from card)
+	local iconFrame = card:FindFirstChild("IconFrame")
+	local iconLabel = iconFrame and iconFrame:FindFirstChild("IconLabel")
+
+	local itemNameLabel = card:FindFirstChild("ItemNameLabel")
+	local categoryLabelCard = card:FindFirstChild("CategoryLabel")
+	local materialsFrame = card:FindFirstChild("MaterialsFrame")
+	local lockIcon = card:FindFirstChild("LockIcon")
+	local progressBar = card:FindFirstChild("ProgressBar")  -- HIDE IT
+
+	-- HIDE PROGRESS BAR!
+	if progressBar then
+		progressBar.Visible = false
+		progressBar:Destroy()  -- Or just destroy it
+	end
+
+	if iconLabel then 
+		iconLabel.Text = recipe.icon or "❓" 
+	end
+	if itemNameLabel then itemNameLabel.Text = recipeName end
+	if categoryLabelCard then categoryLabelCard.Text = recipe.category or "" end
+
+	-- NO MATERIAL BADGES ON CARDS!
+
+	local locked = isRecipeLocked(recipe)
+	local canCraft = canCraftRecipe(recipe)
+
+	if lockIcon then
+		lockIcon.Visible = locked
+	end
+
+	local cardColor = CraftingConfig.GetCardColor(canCraft, locked)
+	card.BackgroundColor3 = cardColor
+
+	if locked then
+		card.BackgroundTransparency = 0.3
+	end
+
+	local clickDetector = Instance.new("TextButton")
+	clickDetector.Size = UDim2.new(1, 0, 1, 0)
+	clickDetector.BackgroundTransparency = 1
+	clickDetector.Text = ""
+	clickDetector.ZIndex = 10
+	clickDetector.Parent = card
+
+	clickDetector.MouseButton1Click:Connect(function()
+		if not locked then
+			selectedRecipe = {name = recipeName, data = recipe}
+			updateDetailsPanel(recipeName, recipe)
+
+			for _, otherCard in pairs(recipeCards) do
+				local stroke = otherCard:FindFirstChild("UIStroke")
+				if stroke then
+					if otherCard == card then
+						stroke.Color = CraftingConfig.COLORS.AccentGold
+						stroke.Thickness = 3
+					else
+						stroke.Color = CraftingConfig.COLORS.BorderGray
+						stroke.Thickness = 1
+					end
+				end
+			end
+		end
+	end)
+
+	card.Visible = true
+	return card
+end
+
+local function clearRecipeList()
+	for _, child in pairs(recipeListFrame:GetChildren()) do
+		if child:IsA("Frame") then
+			child:Destroy()
+		end
+	end
+	recipeCards = {}
+	tierSeparators = {}
+end
+
+local function populateRecipeList()
+	clearRecipeList()
+
+	local recipesByTier = {}
+	for recipeName, recipe in pairs(CraftingRecipes) do
+		local tier = recipe.tier or 1
+		if not recipesByTier[tier] then
+			recipesByTier[tier] = {}
+		end
+		table.insert(recipesByTier[tier], {name = recipeName, data = recipe})
+	end
+
+	local layoutOrder = 0
+
+	for tier = 1, CraftingConfig.MAX_TIERS do
+		local recipesInTier = recipesByTier[tier] or {}
+
+		if #recipesInTier > 0 then
+			local separator = tierSeparatorTemplate:Clone()
+			local labelFrame = separator:FindFirstChild("LabelFrame")
+
+			if labelFrame then
+				local tierLabel = labelFrame:FindFirstChild("TierLabel")
+				if tierLabel then
+					local tierName = CraftingConfig.GetTierName(tier)
+					tierLabel.Text = "NEEDS " .. tierName:upper()
+				end
+			end
+
+			separator.LayoutOrder = tier * CraftingConfig.LAYOUT.TIER_SEPARATOR_INCREMENT
+			separator.Visible = true
+			separator.Parent = recipeListFrame
+			layoutOrder = separator.LayoutOrder
+
+			tierSeparators[tier] = separator
+
+			local currentRow = nil
+			local cardsInRow = 0
+
+			for i, recipeInfo in ipairs(recipesInTier) do
+				if cardsInRow == 0 then
+					currentRow = recipeRowTemplate:Clone()
+					layoutOrder = layoutOrder + 1
+					currentRow.LayoutOrder = layoutOrder
+					currentRow.Visible = true
+					currentRow.Parent = recipeListFrame
+				end
+
+				local card = createRecipeCard(recipeInfo.name, recipeInfo.data)
+				card.Parent = currentRow
+				table.insert(recipeCards, card)
+
+				cardsInRow = cardsInRow + 1
+
+				if cardsInRow >= CraftingConfig.LAYOUT.CARDS_PER_ROW then
+					cardsInRow = 0
+					currentRow = nil
+				end
+			end
+		end
+	end
+
+	for _, card in ipairs(recipeCards) do
+		local recipeName = card:FindFirstChild("ItemNameLabel")
+		if recipeName then
+			local recipe = CraftingRecipes[recipeName.Text]
+			if recipe and not isRecipeLocked(recipe) then
+				selectedRecipe = {name = recipeName.Text, data = recipe}
+				updateDetailsPanel(recipeName.Text, recipe)
+
+				local stroke = card:FindFirstChild("UIStroke")
+				if stroke then
+					stroke.Color = CraftingConfig.COLORS.AccentGold
+					stroke.Thickness = 3
+				end
+
+				break
+			end
+		end
+	end
+
+	-- FIX: Wait for layout to calculate, then add extra canvas space for bottom padding
+	task.wait(0.1)
+	local contentSize = recipeListFrame.AbsoluteCanvasSize.Y
+	local frameSize = recipeListFrame.AbsoluteSize.Y
+	local extraPadding = frameSize * 0.3  -- Add 30% extra space for bottom padding
+	recipeListFrame.CanvasSize = UDim2.new(0, 0, 0, contentSize + extraPadding)
+	print("✅ Canvas size adjusted:", contentSize, "+", extraPadding, "=", contentSize + extraPadding)
+end
+
+local function refreshRecipeCards()
+	for _, card in pairs(recipeCards) do
+		local itemNameLabel = card:FindFirstChild("ItemNameLabel")
+		if itemNameLabel then
+			local recipeName = itemNameLabel.Text
+			local recipe = CraftingRecipes[recipeName]
+
+			if recipe then
+				local locked = isRecipeLocked(recipe)
+				local canCraft = canCraftRecipe(recipe)
+				local cardColor = CraftingConfig.GetCardColor(canCraft, locked)
+
+				card.BackgroundColor3 = cardColor
+				card.BackgroundTransparency = locked and 0.3 or 0
+
+				local lockIcon = card:FindFirstChild("LockIcon")
+				if lockIcon then
+					lockIcon.Visible = locked
+				end
+			end
+		end
+	end
+
+	if selectedRecipe then
+		updateDetailsPanel(selectedRecipe.name, selectedRecipe.data)
+	end
+end
+
+-- ===========================
+-- GUI OPENING/CLOSING
+-- ===========================
+
+local function openCraftingGUI()
+	local success, tier = pcall(function()
+		return getPlayerTierFunction:InvokeServer()
+	end)
+
+	if success and tier then
+		currentPlayerTier = tier
+	else
+		currentPlayerTier = 1
+	end
+
+	local success2, inventory = pcall(function()
+		return getBasketInventoryFunction:InvokeServer()
+	end)
+
+	if success2 and inventory then
+		currentBasketInventory = inventory
+	else
+		currentBasketInventory = {}
+	end
+
+	titleLabel.Text = CraftingConfig.GetTierName(currentPlayerTier)
+
+	updateMaterialCounters()
+	populateRecipeList()
+
+	craftingGui.Enabled = true
+	print("✅ Crafting GUI opened!")
+end
+
+local function closeCraftingGUI()
+	craftingGui.Enabled = false
+	selectedRecipe = nil
+	isCrafting = false
+end
+
+-- ===========================
+-- BUTTON HANDLERS
+-- ===========================
+
+closeButton.MouseButton1Click:Connect(closeCraftingGUI)
+
+craftButton.MouseButton1Click:Connect(function()
+	if not selectedRecipe or isCrafting then return end
+
+	local recipe = selectedRecipe.data
+	local locked = isRecipeLocked(recipe)
+	local canCraft = canCraftRecipe(recipe)
+
+	if locked or not canCraft then return end
+
+	isCrafting = true
+	updateDetailsPanel(selectedRecipe.name, recipe)
+
+	requestCraftEvent:FireServer(selectedRecipe.name)
+end)
+
+if tierSelector then
+	for _, button in pairs(tierSelector:GetChildren()) do
+		if button:IsA("TextButton") then
+			button.MouseButton1Click:Connect(function()
+				local tierNum = tonumber(button.Name:match("%d+"))
+
+				if tierNum then
+					for _, otherButton in pairs(tierSelector:GetChildren()) do
+						if otherButton:IsA("TextButton") then
+							if otherButton == button then
+								otherButton.BackgroundColor3 = CraftingConfig.COLORS.AccentGold
+							else
+								otherButton.BackgroundColor3 = CraftingConfig.COLORS.MediumGray
+							end
+						end
+					end
+
+					scrollToTier(tierNum)
+				end
+			end)
+		end
+	end
+end
+
+-- ===========================
+-- REMOTE EVENT LISTENERS
+-- ===========================
+
+basketUpdatedEvent.OnClientEvent:Connect(function(newInventory)
+	if craftingGui.Enabled then
+		currentBasketInventory = newInventory
+		updateMaterialCounters()
+		refreshRecipeCards()
+	end
+end)
+
+tierUpdatedEvent.OnClientEvent:Connect(function(newTier)
+	currentPlayerTier = newTier
+
+	if craftingGui.Enabled then
+		titleLabel.Text = CraftingConfig.GetTierName(newTier)
+		populateRecipeList()
+	end
+end)
+
+craftResultEvent.OnClientEvent:Connect(function(success, message)
+	isCrafting = false
+
+	if craftingGui.Enabled then
+		if success then
+			local success2, inventory = pcall(function()
+				return getBasketInventoryFunction:InvokeServer()
+			end)
+
+			if success2 and inventory then
+				currentBasketInventory = inventory
+				updateMaterialCounters()
+				refreshRecipeCards()
+			end
+		end
+
+		print(message)
+	end
+end)
+
+-- ===========================
+-- PROXIMITY PROMPT DETECTION
+-- ===========================
+
+local workspace = game:GetService("Workspace")
+
+local function setupCraftingBench(bench)
+	if bench.Name ~= "CraftingBench" then return end
+
+	for _, descendant in pairs(bench:GetDescendants()) do
+		if descendant:IsA("ProximityPrompt") then
+			print("✅ Found ProximityPrompt in", bench.Name)
+
+			descendant.Triggered:Connect(function(playerWhoTriggered)
+				if playerWhoTriggered == player then
+					print("🎯 Opening crafting GUI...")
+					openCraftingGUI()
+				end
+			end)
+		end
+	end
+end
+
+for _, obj in pairs(workspace:GetDescendants()) do
+	if obj:IsA("Model") and obj.Name == "CraftingBench" then
+		setupCraftingBench(obj)
+	end
+end
+
+workspace.DescendantAdded:Connect(function(obj)
+	if obj:IsA("Model") and obj.Name == "CraftingBench" then
+		task.wait(0.1)
+		setupCraftingBench(obj)
+	end
+end)
+
+print("✅ CraftingClient loaded successfully!")
+print("🎮 Walk to a CraftingBench and press E to open the GUI")
