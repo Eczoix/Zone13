@@ -1,0 +1,289 @@
+-- ⚔️ MELEE WEAPON HANDLER
+-- Universal handler for all melee weapons
+-- Automatically handles combat, combos, animations, and effects
+-- UPDATED: Only targets enemies tagged with "Enemy" (zombies/NPCs)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local CollectionService = game:GetService("CollectionService")
+
+-- Modules
+local WeaponConfig = require(ReplicatedStorage:WaitForChild("WeaponConfig_Melee"))
+local SpecialEffects = require(ReplicatedStorage:WaitForChild("SpecialEffects"))
+
+-- Player setup
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+
+-- Current weapon tracking
+local currentWeapon = nil
+local currentStats = nil
+local isEquipped = false
+local canAttack = true
+
+-- Combo tracking
+local comboPosition = 1
+local lastAttackTime = 0
+
+-- Animation tracking
+local animator = humanoid:WaitForChild("Animator")
+local loadedAnimations = {}
+
+-- ═══════════════════════════════════════════════════════════════
+--                         HELPER FUNCTIONS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Load animations for weapon
+local function loadAnimations(stats)
+	-- Clear old animations
+	for _, anim in pairs(loadedAnimations) do
+		anim:Stop()
+		anim:Destroy()
+	end
+	loadedAnimations = {}
+
+	if stats.HasCombo then
+		-- Load combo animations
+		for i, animId in ipairs(stats.ComboAnimations) do
+			if animId and animId ~= "rbxassetid://0" then
+				local anim = Instance.new("Animation")
+				anim.AnimationId = animId
+				loadedAnimations[i] = animator:LoadAnimation(anim)
+			end
+		end
+	else
+		-- Load single animation
+		if stats.Animation and stats.Animation ~= "rbxassetid://0" then
+			local anim = Instance.new("Animation")
+			anim.AnimationId = stats.Animation
+			loadedAnimations[1] = animator:LoadAnimation(anim)
+		end
+	end
+end
+
+-- Reset combo
+local function resetCombo()
+	comboPosition = 1
+end
+
+-- Check if combo should reset based on time
+local function shouldResetCombo(resetTime)
+	local currentTime = tick()
+	return (currentTime - lastAttackTime) > resetTime
+end
+
+-- Play current animation
+local function playAnimation()
+	local animToPlay = loadedAnimations[comboPosition] or loadedAnimations[1]
+
+	if animToPlay then
+		animToPlay:Play()
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                         DAMAGE SYSTEM
+-- ═══════════════════════════════════════════════════════════════
+
+-- Remote event for damage (create this in ReplicatedStorage)
+local damageEvent = ReplicatedStorage:FindFirstChild("MeleeDamageEvent")
+if not damageEvent then
+	damageEvent = Instance.new("RemoteEvent")
+	damageEvent.Name = "MeleeDamageEvent"
+	damageEvent.Parent = ReplicatedStorage
+end
+
+-- Detect and damage enemies
+local function performAttack()
+	if not currentWeapon or not currentStats or not canAttack then return end
+
+	canAttack = false
+
+	-- Check if combo should reset (too much time passed)
+	if currentStats.HasCombo then
+		local resetTime = currentStats.ComboResetTime or 2
+		if shouldResetCombo(resetTime) then
+			resetCombo()
+		end
+	end
+
+	-- Play animation
+	playAnimation()
+
+	-- Get weapon handle
+	local handle = currentWeapon:FindFirstChild("Handle")
+	if not handle then
+		warn("Weapon missing Handle:", currentWeapon.Name)
+		canAttack = true
+		return
+	end
+
+	-- Find enemies (zombies/NPCs tagged as "Enemy") in range
+	local hitCharacters = {}
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+
+	if rootPart then
+		-- Get all models tagged as "Enemy" (your zombies/NPCs)
+		local enemies = CollectionService:GetTagged("Enemy")
+
+		for _, enemy in pairs(enemies) do
+			if enemy:IsA("Model") and enemy ~= character then
+				local humanoid = enemy:FindFirstChildOfClass("Humanoid")
+				local enemyRoot = enemy:FindFirstChild("HumanoidRootPart")
+
+				if humanoid and enemyRoot and humanoid.Health > 0 then
+					-- Check distance
+					local distance = (handle.Position - enemyRoot.Position).Magnitude
+
+					if distance <= currentStats.Range then
+						table.insert(hitCharacters, enemy)
+					end
+				end
+			end
+		end
+	end
+
+	-- Send damage to server
+	if #hitCharacters > 0 then
+		damageEvent:FireServer(hitCharacters, currentStats.Damage, currentStats.SpecialEffect)
+	end
+
+	-- Combo progression
+	if currentStats.HasCombo then
+		comboPosition = comboPosition + 1
+
+		-- Cap at max combo animations
+		if comboPosition > #currentStats.ComboAnimations then
+			comboPosition = 1
+		end
+	end
+
+	-- Update last attack time for combo reset tracking
+	lastAttackTime = tick()
+
+	-- Attack cooldown
+	task.wait(currentStats.AttackSpeed)
+	canAttack = true
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                         TOOL EVENTS
+-- ═══════════════════════════════════════════════════════════════
+
+-- When player equips a tool
+local function onToolEquipped(tool)
+	-- Check if it's a melee weapon
+	local stats = WeaponConfig:GetWeaponStats(tool.Name)
+
+	if stats then
+		currentWeapon = tool
+		currentStats = stats
+		isEquipped = true
+		canAttack = true
+
+		-- Load animations
+		loadAnimations(stats)
+
+		-- Reset combo
+		resetCombo()
+
+		print("Equipped melee weapon:", tool.Name)
+	end
+end
+
+-- When player unequips a tool
+local function onToolUnequipped(tool)
+	if currentWeapon == tool then
+		isEquipped = false
+		currentWeapon = nil
+		currentStats = nil
+
+		-- Clear animations
+		for _, anim in pairs(loadedAnimations) do
+			anim:Stop()
+		end
+		loadedAnimations = {}
+
+		-- Reset combo
+		resetCombo()
+
+		print("Unequipped weapon:", tool.Name)
+	end
+end
+
+-- Tool activated (clicked)
+local function onToolActivated(tool)
+	if currentWeapon == tool and isEquipped then
+		performAttack()
+	end
+end
+
+-- ═══════════════════════════════════════════════════════════════
+--                         SETUP LISTENERS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Listen for tool equip/unequip in character
+character.ChildAdded:Connect(function(child)
+	if child:IsA("Tool") then
+		onToolEquipped(child)
+
+		-- Connect activated
+		child.Activated:Connect(function()
+			onToolActivated(child)
+		end)
+
+		-- Connect unequipped
+		child.Unequipped:Connect(function()
+			onToolUnequipped(child)
+		end)
+	end
+end)
+
+-- Check if player already has a tool equipped
+for _, child in pairs(character:GetChildren()) do
+	if child:IsA("Tool") then
+		onToolEquipped(child)
+
+		child.Activated:Connect(function()
+			onToolActivated(child)
+		end)
+
+		child.Unequipped:Connect(function()
+			onToolUnequipped(child)
+		end)
+	end
+end
+
+-- Handle respawn
+player.CharacterAdded:Connect(function(newCharacter)
+	character = newCharacter
+	humanoid = character:WaitForChild("Humanoid")
+	animator = humanoid:WaitForChild("Animator")
+
+	-- Reset tracking
+	currentWeapon = nil
+	currentStats = nil
+	isEquipped = false
+	canAttack = true
+	loadedAnimations = {}
+	resetCombo()
+	lastAttackTime = 0
+
+	-- Setup listeners for new character
+	character.ChildAdded:Connect(function(child)
+		if child:IsA("Tool") then
+			onToolEquipped(child)
+
+			child.Activated:Connect(function()
+				onToolActivated(child)
+			end)
+
+			child.Unequipped:Connect(function()
+				onToolUnequipped(child)
+			end)
+		end
+	end)
+end)
+
+print("✅ Melee Weapon Handler loaded! (Zombie mode - only attacks enemies tagged 'Enemy')")
