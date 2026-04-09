@@ -1,0 +1,19 @@
+-- FallDamageHandler (Script > ServerScriptService)
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local fallDamageEvent = ReplicatedStorage:WaitForChild("GameRemotes"):WaitForChild("FallDamageEvent")
+fallDamageEvent.OnServerEvent:Connect(function(player, damage)
+	-- Sanity check the damage value so exploiters can't send 99999
+	if typeof(damage) ~= "number" then return end
+	damage = math.clamp(damage, 0, 100)
+
+	local character = player.Character
+	if not character then return end
+
+	local humanoid = character:FindFirstChild("Humanoid")
+	if humanoid and humanoid.Health > 0 then
+		humanoid:TakeDamage(damage)
+	end
+end)
