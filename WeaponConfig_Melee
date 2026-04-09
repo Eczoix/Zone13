@@ -1,0 +1,237 @@
+-- ⚔️ MELEE WEAPON CONFIGURATION
+-- Add all your melee weapon stats here
+-- Easy to add new weapons - just copy a template and modify!
+
+local WeaponConfig_Melee = {}
+
+-- ═══════════════════════════════════════════════════════════════
+--                         WEAPON DATABASE
+-- ═══════════════════════════════════════════════════════════════
+
+WeaponConfig_Melee.Weapons = {
+
+	-- ═══════════════════════════════════════════════════════════
+	--                    BASIC WEAPONS (TIER 1)
+	-- ═══════════════════════════════════════════════════════════
+
+	["Wooden Sword"] = {
+		Damage = 10,
+		AttackSpeed = 0.1,      -- Seconds between attacks
+		Range = 8,              -- Studs
+		Durability = 50,        -- Hits before breaking (nil = infinite)
+
+		-- COMBO SYSTEM
+		HasCombo = true,        -- Does this weapon have a combo?
+		ComboAnimations = {
+			"rbxassetid://0",   -- Animation 1 (replace with your ID)
+			"rbxassetid://0",   -- Animation 2
+			"rbxassetid://0"    -- Animation 3 (finisher)
+		},
+		ComboResetTime = 2,     -- Seconds before combo resets
+
+		-- SPECIAL EFFECTS (nil = no effect)
+		SpecialEffect = nil
+	},
+
+	["Stone Axe"] = {
+		Damage = 15,
+		AttackSpeed = 1.2,
+		Range = 7,
+		Durability = 75,
+
+		-- NO COMBO - Single animation
+		HasCombo = false,
+		Animation = "rbxassetid://0",  -- Single swing animation
+
+		SpecialEffect = nil
+	},
+
+	-- ═══════════════════════════════════════════════════════════
+	--                   ADVANCED WEAPONS (TIER 2)
+	-- ═══════════════════════════════════════════════════════════
+
+	["Metal Sword"] = {
+		Damage = 25,
+		AttackSpeed = 0.8,
+		Range = 10,
+		Durability = 100,
+
+		HasCombo = true,
+		ComboAnimations = {
+			"rbxassetid://0",
+			"rbxassetid://0",
+			"rbxassetid://0"
+		},
+		ComboResetTime = 2,
+
+		SpecialEffect = nil
+	},
+
+	["Metal Axe"] = {
+		Damage = 20,
+		AttackSpeed = 1.0,
+		Range = 8,
+		Durability = 150,
+
+		HasCombo = false,
+		Animation = "rbxassetid://0",
+
+		SpecialEffect = nil
+	},
+
+	-- ═══════════════════════════════════════════════════════════
+	--                   SPECIAL WEAPONS (TIER 3)
+	-- ═══════════════════════════════════════════════════════════
+
+	["Poison Blade"] = {
+		Damage = 15,
+		AttackSpeed = 0.9,
+		Range = 9,
+		Durability = 80,
+
+		HasCombo = true,
+		ComboAnimations = {
+			"rbxassetid://0",
+			"rbxassetid://0",
+			"rbxassetid://0"
+		},
+		ComboResetTime = 2,
+
+		-- POISON EFFECT
+		SpecialEffect = {
+			Type = "Poison",
+			DamagePerTick = 2,      -- Damage every tick
+			TickInterval = 1,       -- Seconds between ticks
+			Duration = 5,           -- Total duration
+			Color = Color3.fromRGB(0, 255, 0)  -- Green
+		}
+	},
+
+	["Fire Sword"] = {
+		Damage = 20,
+		AttackSpeed = 1.0,
+		Range = 10,
+		Durability = 100,
+
+		HasCombo = true,
+		ComboAnimations = {
+			"rbxassetid://0",
+			"rbxassetid://0",
+			"rbxassetid://0"
+		},
+		ComboResetTime = 2,
+
+		-- BURN EFFECT
+		SpecialEffect = {
+			Type = "Burn",
+			DamagePerTick = 3,
+			TickInterval = 0.5,
+			Duration = 4,
+			Color = Color3.fromRGB(255, 100, 0)  -- Orange
+		}
+	},
+
+	["Ice Hammer"] = {
+		Damage = 30,
+		AttackSpeed = 1.5,
+		Range = 8,
+		Durability = 120,
+
+		HasCombo = false,
+		Animation = "rbxassetid://0",
+
+		-- SLOW EFFECT
+		SpecialEffect = {
+			Type = "Slow",
+			SlowPercent = 50,       -- 50% slower
+			Duration = 3,
+			Color = Color3.fromRGB(100, 200, 255)  -- Light blue
+		}
+	},
+
+	["Stun Mace"] = {
+		Damage = 18,
+		AttackSpeed = 1.3,
+		Range = 7,
+		Durability = 90,
+
+		HasCombo = false,
+		Animation = "rbxassetid://0",
+
+		-- STUN EFFECT
+		SpecialEffect = {
+			Type = "Stun",
+			Duration = 2,           -- Can't move for 2 seconds
+			Color = Color3.fromRGB(255, 255, 0)  -- Yellow
+		}
+	},
+
+} 
+
+-- ═══════════════════════════════════════════════════════════════
+--                    📝 HOW TO ADD NEW WEAPONS
+-- ═══════════════════════════════════════════════════════════════
+--[[
+
+STEP 1: Copy this template:
+
+["Your Weapon Name"] = {
+	Damage = 20,
+	AttackSpeed = 1.0,
+	Range = 9,
+	Durability = 100,  -- or nil for infinite
+	
+	-- For COMBO weapons (2-3 animations):
+	HasCombo = true,
+	ComboAnimations = {
+		"rbxassetid://ANIM_1_ID",
+		"rbxassetid://ANIM_2_ID",
+		"rbxassetid://ANIM_3_ID"  -- Optional 3rd animation
+	},
+	ComboResetTime = 2,
+	
+	-- OR for SINGLE animation weapons:
+	HasCombo = false,
+	Animation = "rbxassetid://YOUR_ANIM_ID",
+	
+	-- Special effects (optional):
+	SpecialEffect = {
+		Type = "Poison",  -- or "Burn", "Slow", "Stun"
+		DamagePerTick = 2,
+		TickInterval = 1,
+		Duration = 5,
+		Color = Color3.fromRGB(0, 255, 0)
+	}
+	-- OR
+	SpecialEffect = nil  -- No special effect
+},
+
+STEP 2: Make sure weapon Tool name matches the config name exactly
+STEP 3: Done!
+
+--]]
+
+-- ═══════════════════════════════════════════════════════════════
+--                         HELPER FUNCTIONS
+-- ═══════════════════════════════════════════════════════════════
+
+-- Get weapon stats by name
+function WeaponConfig_Melee:GetWeaponStats(weaponName)
+	return self.Weapons[weaponName]
+end
+
+-- Check if a weapon exists in config
+function WeaponConfig_Melee:IsValidWeapon(weaponName)
+	return self.Weapons[weaponName] ~= nil
+end
+
+-- Get all weapon names
+function WeaponConfig_Melee:GetAllWeaponNames()
+	local names = {}
+	for weaponName, _ in pairs(self.Weapons) do
+		table.insert(names, weaponName)
+	end
+	return names
+end
+
+return WeaponConfig_Melee
